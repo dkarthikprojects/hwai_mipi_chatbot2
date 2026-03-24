@@ -152,9 +152,17 @@ function mock(name, inp) {
 }
 
 async function callAPI(hist, sys, onTool) {
-  const res = await fetch("https://api.anthropic.com/v1/messages", {
+  // In Vercel: calls /api/chat (serverless proxy) — keeps API key server-side.
+  // In Claude.ai artifact: calls Anthropic directly via the built-in proxy.
+  const isDev = typeof window !== "undefined"
+    && window.location.hostname === "localhost";
+  const endpoint = isDev
+    ? "https://api.anthropic.com/v1/messages"
+    : "/api/chat";
+  const headers = {"Content-Type":"application/json"};
+  const res = await fetch(endpoint, {
     method:"POST",
-    headers:{"Content-Type":"application/json"},
+    headers,
     body:JSON.stringify({
       model:C.model, max_tokens:C.tokens,
       system:sys, tools:ATOOLS, messages:hist,
