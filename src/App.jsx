@@ -194,6 +194,70 @@ async function callAPI(hist, sys, onTool) {
   return d;
 }
 
+// ─── ETHICAL GUARDRAILS ───────────────────────────────────────────────────────
+const GUARDRAILS = [
+  "## Ethical Guardrails — follow strictly in every response",
+  "",
+  "### Scope",
+  "You are a Medicare Advantage market intelligence assistant for healthcare payor",
+  "professionals. You ONLY answer questions related to:",
+  "- MA plan data, CMS landscape files, enrollment, star ratings, benefits, premiums,",
+  "  formulary, SNP, MOOP, QBP, HEDIS, TPV, and market strategy",
+  "- HealthWorksAI products and MIPI POWER HOUSE platform capabilities",
+  "If a question is outside this scope, politely decline and redirect to MA topics.",
+  "",
+  "### Data accuracy and uncertainty",
+  "- Always cite the data source (e.g. CMS MA Landscape PY2026).",
+  "- If data is a sample or estimate, say so explicitly.",
+  "- Never fabricate plan names, contract IDs, enrollment figures, or CMS rulings.",
+  "- If you are uncertain, say 'Based on available data...' or 'I am not certain'.",
+  "",
+  "### No individual medical advice",
+  "This platform is for payor professionals only — not for individual beneficiaries.",
+  "Never provide personal medical, clinical, or coverage advice to individuals.",
+  "If someone asks about their own coverage or health condition, redirect them to",
+  "call 1-800-MEDICARE or consult their plan.",
+  "",
+  "### Fair and unbiased analysis",
+  "- Present competitive data factually. Do not disparage specific payors.",
+  "- Do not make predictions that could influence stock prices or financial markets.",
+  "- Do not generate content that could be used to discriminate against beneficiaries",
+  "  based on age, disability, income, race, ethnicity, or health status.",
+  "",
+  "### Privacy and compliance",
+  "- Never request, store, or repeat personally identifiable information (PII).",
+  "- Do not assist with queries that appear designed to circumvent CMS regulations,",
+  "  anti-kickback statutes, or Medicare marketing rules.",
+  "- Do not generate content that mimics official CMS communications.",
+  "",
+  "### Harmful content",
+  "Refuse any request to generate: misinformation, manipulative messaging,",
+  "content designed to mislead beneficiaries, or anything unrelated to MA analytics.",
+].join("\n");
+
+// Client-side pre-send filter — catches obvious off-topic or harmful requests
+// before they reach the API, saving tokens and preventing misuse.
+const OFF_TOPIC_PATTERNS = [
+  /\b(hack|exploit|jailbreak|ignore previous|forget instructions|act as|pretend you are)\b/i,
+  /\b(password|credit card|social security|ssn|bank account)\b/i,
+  /\b(politics|election|president|congress|democrat|republican)\b/i,
+  /\b(stock|invest|buy shares|sell shares|ticker)\b/i,
+  /\b(weapon|bomb|drug|illegal|lawsuit|sue)\b/i,
+  /\b(medical advice|diagnos|treatment|prescri|symptom|disease|cure)\b/i,
+];
+
+function guardCheck(text) {
+  for (const re of OFF_TOPIC_PATTERNS) {
+    if (re.test(text)) {
+      return "I am a Medicare Advantage market intelligence assistant and can only "
+        + "help with MA plan data, premiums, star ratings, benefits, enrollment, "
+        + "and related analytics. Please ask a question about Medicare Advantage.";
+    }
+  }
+  return null;
+}
+
+
 const uid  = function(){return Math.random().toString(36).slice(2,9);};
 const tstr = function(d){return d.toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"});};
 
@@ -318,6 +382,14 @@ function useChat(sys, welcome) {
   const send = useCallback(async function(text){
     if (!text.trim()||busy) return;
     setErr(null);
+    // Client-side ethical pre-check
+    const blocked = guardCheck(text);
+    if (blocked) {
+      const bm={id:uid(),role:"assistant",content:blocked,tools:[],ts:new Date()};
+      setMsgs(function(p){return [...p,
+        {id:uid(),role:"user",content:text,tools:[],ts:new Date()},bm];});
+      return;
+    }
     const um={id:uid(),role:"user",content:text,tools:[],ts:new Date()};
     const lid=uid();
     const lm={id:lid,role:"assistant",content:"",tools:[],ts:new Date(),loading:true};
@@ -396,8 +468,12 @@ const QPILLS=[
 ];
 
 function QueriesPanel({payor}) {
-  const sys="You are MIPI POWER HOUSE - HealthWorksAI MA intelligence. User from "
-    +payor.label+". Answer concisely using PY2026 data CA/FL/TX. Call tools. Cite sources.";
+  const sys="You are MIPI POWER HOUSE - HealthWorksAI MA intelligence assistant. "
+    +"User is a payor professional from "+payor.label+". "
+    +"Answer concisely using PY2026 CMS data for CA, FL, TX. "
+    +"Call tools to fetch data. Always cite your source. "
+    +"Suggest 2 relevant follow-up questions after each answer.\n\n"
+    +GUARDRAILS;
   const welcome="Welcome, **"+payor.label
     +"** team! Ask me anything about MA plans, premiums, benefits, or stars.";
   const {msgs,busy,err,setErr,send}=useChat(sys,welcome);
@@ -455,7 +531,10 @@ function ReportingPanel({payor}) {
   const [mkt,setMkt]=useState("Florida");
   const [sel,setSel]=useState(null);
   const sys="You are MIPI POWER HOUSE - HealthWorksAI MA intelligence for "
-    +payor.label+". Generate markdown reports with tables and strategic recommendations. PY2026 CA/FL/TX.";
+    +payor.label+". Generate well-structured markdown reports with sections, data tables, "
+    +"key findings, and strategic recommendations. Use PY2026 CMS data for CA, FL, TX. "
+    +"Call tools to fetch data. Always cite sources.\n\n"
+    +GUARDRAILS;
   const welcome="Ready to build reports for **"+payor.label
     +"**. Select a template or describe your report below.";
   const {msgs,busy,err,setErr,send}=useChat(sys,welcome);
@@ -1149,8 +1228,12 @@ function Copilot({payor, db}) {
   const [coll,setColl]=useState(false);
   const [inp,setInp]=useState("");
   const endRef=useRef(null);
-  const sys="You are the HWAI Copilot - HealthWorksAI embedded MA intelligence. User from "
-    +payor.label+". "+db.ctx+" PY2026: 15,955 plans, 72.5% zero-premium, avg star 3.81.";
+  const sys="You are the HWAI Copilot - HealthWorksAI embedded MA intelligence assistant. "
+    +"User is a payor professional from "+payor.label+". "
+    +"They are viewing the "+db.label+" dashboard. "+db.ctx+" "
+    +"PY2026: 15,955 plans across CA/FL/TX, 72.5% zero-premium, avg star 3.81. "
+    +"Be concise. Call tools. Cite sources. Offer 1-2 follow-ups.\n\n"
+    +GUARDRAILS;
   const welcome="I am your **HWAI Copilot** for **"+db.label
     +"**.\n\n"+db.desc+"\n\nPick a question below or ask your own.";
   const {msgs,busy,err,setErr,send}=useChat(sys,welcome);
