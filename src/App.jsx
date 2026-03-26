@@ -1708,11 +1708,10 @@ function Copilot({payor, db, planCtx, sendRef}) {
   const [inp, setInp] = useState("");
   const endRef = useRef(null);
 
-  // ── Silent filter context — absorbed from Plan Comparison iframe ────────────
-  // Stored as a ref so it doesn't trigger re-renders
-  const activeFilters = useRef({});
+  // ── Filter context absorbed from Plan Comparison iframe ─────────────────────
+  const activeFilters  = useRef({});                 // used in buildFilterCtx (no re-render)
+  const [displayFilters, setDisplayFilters] = useState({}); // drives the visible pill strip
 
-  // When planCtx arrives from iframe postMessage, silently update filters
   useEffect(function(){
     if (!planCtx) return;
     const updated = {};
@@ -1722,9 +1721,10 @@ function Copilot({payor, db, planCtx, sendRef}) {
     if (planCtx.county)    updated.county    = planCtx.county;
     if (planCtx.snp_type)  updated.snp_type  = planCtx.snp_type;
     if (planCtx.year)      updated.year      = planCtx.year;
-    // Merge into active filters
-    activeFilters.current = Object.assign({}, activeFilters.current, updated);
-    console.log("[Copilot] absorbed filters:", activeFilters.current);
+    const merged = Object.assign({}, activeFilters.current, updated);
+    activeFilters.current = merged;
+    setDisplayFilters(Object.assign({}, merged)); // trigger re-render for UI
+    console.log("[Copilot] absorbed filters:", merged);
   }, [planCtx]);
 
   // Build filter context string — silently injected into every message
@@ -1865,7 +1865,92 @@ function Copilot({payor, db, planCtx, sendRef}) {
         </div>
       </div>
 
-      {/* Plan context banner — shown when iframe absorbs filters */}
+      {/* Filter context strip — always visible, shows absorbed Plan Comparison filters */}
+      <div style={{
+        padding:"6px 10px",
+        background:"#0A1628",
+        borderBottom:"1px solid #1E293B",
+        flexShrink:0,
+      }}>
+        <div style={{
+          display:"flex",alignItems:"center",
+          justifyContent:"space-between",marginBottom:4,
+        }}>
+          <div style={{
+            fontSize:8.5,fontWeight:700,
+            color: Object.keys(displayFilters).length > 0 ? "#38BDF8" : "#334155",
+            textTransform:"uppercase",letterSpacing:".08em",
+            display:"flex",alignItems:"center",gap:4,
+          }}>
+            <span style={{
+              width:5,height:5,borderRadius:"50%",
+              background: Object.keys(displayFilters).length > 0 ? "#38BDF8" : "#334155",
+              display:"inline-block",
+              animation: Object.keys(displayFilters).length > 0
+                ? "pulse 1.5s ease-in-out infinite" : "none",
+            }}/>
+            {Object.keys(displayFilters).length > 0
+              ? "Plan Comparison context active"
+              : "Awaiting Plan Comparison filters"}
+          </div>
+          {Object.keys(displayFilters).length > 0 && (
+            <button
+              onClick={function(){
+                activeFilters.current = {};
+                setDisplayFilters({});
+              }}
+              style={{
+                background:"none",border:"none",
+                cursor:"pointer",fontSize:9,
+                color:"#475569",fontFamily:"inherit",padding:"0 2px",
+              }}
+              title="Clear filters">
+              ✕
+            </button>
+          )}
+        </div>
+
+        {Object.keys(displayFilters).length === 0 ? (
+          <div style={{
+            fontSize:9,color:"#1E3A5F",fontStyle:"italic",
+            background:"#0F172A",borderRadius:6,padding:"4px 8px",
+            border:"1px dashed #1E3A5F",
+          }}>
+            Filters selected in Plan Comparison will appear here automatically
+          </div>
+        ) : (
+          <div style={{display:"flex",flexWrap:"wrap",gap:3}}>
+            {[
+              {key:"state",     icon:"📍", label:"State"},
+              {key:"payor",     icon:"🏢", label:"Payor"},
+              {key:"plan_type", icon:"📋", label:"Type"},
+              {key:"snp_type",  icon:"🏥", label:"SNP"},
+              {key:"county",    icon:"🗺️", label:"County"},
+              {key:"year",      icon:"📅", label:"Year"},
+            ].filter(function(f){ return displayFilters[f.key]; })
+            .map(function(f){
+              return (
+                <div key={f.key} style={{
+                  display:"flex",alignItems:"center",gap:3,
+                  background:"#1E3A5F",
+                  border:"1px solid #38BDF833",
+                  borderRadius:12,padding:"2px 8px",
+                }}>
+                  <span style={{fontSize:9}}>{f.icon}</span>
+                  <span style={{fontSize:8.5,color:"#94A3B8",fontWeight:500}}>
+                    {f.label}:
+                  </span>
+                  <span style={{fontSize:9,color:"#E2E8F0",fontWeight:700}}>
+                    {f.key==="year" ? "PY"+displayFilters[f.key] : displayFilters[f.key]}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* Plan context event banner — shown on each new iframe event */}
       {planCtx && (
         <div style={{
           padding:"7px 12px",
