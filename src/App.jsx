@@ -740,17 +740,17 @@ function Bubble({msg, accent}) {
   );
 }
 
-function useChat(sys, welcome) {
-  const [msgs,setMsgs]   = useState([]);
-  const [hist,setHist]   = useState([]);
+function useChat(sys, welcome, initialMsgs, initialHist) {
+  const [msgs,setMsgs]   = useState(function(){
+    return initialMsgs && initialMsgs.length > 0
+      ? initialMsgs
+      : welcome
+        ? [{id:uid(),role:"assistant",content:welcome,tools:[],ts:new Date()}]
+        : [];
+  });
+  const [hist,setHist]   = useState(initialHist || []);
   const [busy,setBusy]   = useState(false);
   const [err,setErr]     = useState(null);
-  useEffect(function(){
-    setMsgs(welcome
-      ? [{id:uid(),role:"assistant",content:welcome,tools:[],ts:new Date()}]
-      : []);
-    setHist([]); setErr(null);
-  },[welcome]);
   const send = useCallback(async function(text){
     if (!text.trim()||busy) return;
     setErr(null);
@@ -839,125 +839,256 @@ const QPILLS=[
   "Show star rating distribution for 2026",
 ];
 
-function QueriesPanel({payor}) {
-  // Poll /api/context every 3s for external filter context (from Plan Comparison etc.)
-  const [extCtx, setExtCtx] = useState(null);
-  const extCtxRef = useRef(null);
-  const lastCtxId = useRef(null);
 
-  useEffect(function(){
-    const isArtifact = typeof window !== "undefined"
-      && window.location.hostname.endsWith("claude.ai");
-    if (isArtifact) return;
+// ─── MULTI-CHAT ENGINE ─────────────────────────────────────────────────────────
+// Manages multiple named chat sessions — shared by GenieAI and Custom Reports
 
-    const sid = "mipi_" + (payor.id || "user");
-    const poll = setInterval(async function(){
-      try {
-        const r = await fetch("/api/context?session_id=" + sid);
-        const d = await r.json();
-        if (d.has_context && d.context && d.context.context_id !== lastCtxId.current) {
-          lastCtxId.current = d.context.context_id;
-          setExtCtx(d.context);
-          // Auto-send the prompt to GenieAI
-          if (extCtxRef.current && d.context.prompt) {
-            setTimeout(function(){
-              extCtxRef.current(d.context.prompt);
-            }, 500);
-          }
-        }
-      } catch(_) {}
-    }, 3000);
-    return function(){ clearInterval(poll); };
-  }, [payor]);
+function makeSession(welcome, label) {
+  const id  = "s_" + Date.now() + "_" + Math.random().toString(36).slice(2,6);
+  const ts  = new Date();
+  const name = label || (
+    ["New chat",
+     ts.toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"}),
+    ].join(" · ")
+  );
+  return {
+    id,
+    name,
+    createdAt: ts,
+    msgs:  [{id:"w0", role:"assistant", content:welcome, loading:false}],
+    hist:  [],
+  };
+}
 
-  const sys="You are GenieAI — HealthWorksAI Medicare Advantage intelligence assistant. "
-    +"User is a payor professional from "+payor.label+". "
-    +"\n\n"
+// ChatShell — renders the session list + active chat window
+// Props: sessions, activeId, onSelect, onNew, onRename, onDelete,
+//        renderChat (fn that returns the chat UI for the active session)
+function ChatShell({
+  sessions, activeId, onSelect, onNew, onRename, onDelete,
+  accent, icon, renderChat,
+}) {
+  const [sideOpen,  setSideOpen]  = useState(true);
+  const [renaming,  setRenaming]  = useState(null); // session id being renamed
+  const [renameVal, setRenameVal] = useState("");
 
-    +"## MEDICARE ADVANTAGE DOMAIN KNOWLEDGE\n"
-    +"A Medicare Advantage plan is uniquely identified by its BID_ID (also written Bid_id). "
-    +"The Bid_id format is: CONTRACT_ID + underscore + PLAN_ID + underscore + SEGMENT_ID "
-    +"(e.g. H0504_041_0 means contract H0504, plan 41, segment 0). "
-    +"IMPORTANT COUNTING RULE: The Stars_Landscape table has ONE ROW PER PLAN-COUNTY combination. "
-    +"The same Bid_id appears in MANY rows — once per county where the plan is offered. "
-    +"When counting plans, ALWAYS count DISTINCT Bid_id values, NOT total rows. "
-    +"The tool already does this deduplication — trust unique_plan_count from tool results, "
-    +"never raw_row_count. "
-    +"A CONTRACT_ID (e.g. H0504) is a contract that may contain multiple plans. "
-    +"A PLAN_ID (e.g. 041) is a specific benefit package within that contract. "
-    +"Together contract_id + plan_id = one unique MA plan (the bid).\n\n"
+  const active = sessions.find(function(s){ return s.id === activeId; });
 
-    +"## DATA MODEL\n"
-    +"- Stars_Landscape: plan-county rows. State stored as FULL NAME ('Florida' not 'FL'). "
-    +"  Key fields: Bid_id, CONTRACT_ID, Plan_ID, Plan_Name, parent_organization, "
-    +"  State, County, Star_Rating, Bench_mark, year.\n"
-    +"- HWAI_Enrollment: member enrollment by state/county/month/payor.\n"
-    +"- Stars_Cutpoint: CMS star rating cutpoints by contract and domain.\n"
-    +"- PartD_MRx: Part D formulary tiers — linked to plans via bid_id.\n"
-    +"- PartD_Ranking: top Medicare drugs by spend/claims/beneficiaries.\n"
-    +"- TPV_Crosswalk: Total Plan Value YoY 2024/2025/2026 per plan.\n"
-    +"- plans: plan comparison data.\n"
-    +"- PC_Dental: dental benefit comparison data.\n\n"
-
-    +"## CRITICAL INSTRUCTIONS\n"
-    +"1. ALWAYS call a tool — NEVER answer from training knowledge. "
-    +"Every data question requires a live database query.\n"
-    +"2. For plan counts: use unique_plan_count (deduplicated by Bid_id). "
-    +"Never say 'X rows' — say 'X unique plans'.\n"
-    +"3. State filter: pass full name e.g. 'Florida', 'Texas', 'California'. "
-    +"The system converts 'FL' → 'Florida' automatically.\n"
-    +"4. For lookup by specific plan: use Bid_id as the primary key.\n"
-    +"5. Report EXACT numbers from tool results. "
-    +"If unique_plan_count = 847, say '847 unique MA plans'.\n"
-    +"6. Always cite the source table name.\n\n"
-
-    +"## TOOL ROUTING\n"
-    +"- Plan counts, star ratings, benchmarks → query_landscape_data\n"
-    +"- Member enrollment, market share → query_enrollment_data\n"
-    +"- Star rating cutpoints, domain scores → query_stars_data\n"
-    +"- Drug tiers for a specific plan (pass bid_id) → query_formulary_data\n"
-    +"- Top drugs by spend/claims → query_drug_rankings\n"
-    +"- Total Plan Value YoY → query_tpv_data\n"
-    +"- Plan benefit comparison → query_plan_comparison\n"
-    +"- Dental benefit comparison → query_dental_comparison\n\n"
-    +GUARDRAILS;
-  const welcome="Welcome, **"+payor.label
-    +"** team! Ask me anything about MA plans, premiums, benefits, or stars.";
-  const {msgs,busy,err,setErr,send}=useChat(sys,welcome);
-  // Register send fn so context poller can auto-prompt
-  useEffect(function(){ extCtxRef.current = send; },[send]);
-  const endRef=useRef(null);
-  useEffect(function(){endRef.current&&endRef.current.scrollIntoView({behavior:"smooth"});},[msgs]);
   return (
-    <div style={{flex:1,display:"flex",flexDirection:"column",overflow:"hidden"}}>
-      {/* External context banner */}
-      {extCtx && (
+    <div style={{flex:1,display:"flex",overflow:"hidden"}}>
+
+      {/* ── Session sidebar ─────────────────────────────────────────── */}
+      {sideOpen && (
         <div style={{
-          padding:"7px 16px",background:"#F0FDFA",
-          borderBottom:"1px solid #99F6E4",
-          display:"flex",alignItems:"center",gap:8,flexShrink:0,
+          width:210,flexShrink:0,
+          background:"#F8FAFC",
+          borderRight:"1px solid #E2E8F0",
+          display:"flex",flexDirection:"column",
+          overflow:"hidden",
         }}>
-          <span style={{fontSize:13}}>📡</span>
-          <div style={{flex:1,fontSize:11,color:"#0F766E"}}>
-            <strong>External context received</strong>
-            {extCtx.filters && extCtx.filters.state &&
-              <span> · State: {extCtx.filters.state}</span>}
-            {extCtx.filters && extCtx.filters.payor &&
-              <span> · Payor: {extCtx.filters.payor}</span>}
-            {extCtx.filters && extCtx.filters.plan_type &&
-              <span> · Type: {extCtx.filters.plan_type}</span>}
-            <span style={{color:"#94A3B8",marginLeft:6}}>
-              from {extCtx.source} · {new Date(extCtx.timestamp).toLocaleTimeString()}
+          {/* Header */}
+          <div style={{
+            padding:"10px 10px 8px",
+            borderBottom:"1px solid #E2E8F0",
+            display:"flex",alignItems:"center",gap:6,flexShrink:0,
+          }}>
+            <span style={{fontSize:14}}>{icon}</span>
+            <span style={{fontWeight:700,fontSize:12,color:"#0F172A",flex:1}}>
+              Conversations
             </span>
+            <button onClick={function(){setSideOpen(false);}}
+              style={{background:"none",border:"none",cursor:"pointer",
+                color:"#94A3B8",fontSize:14,lineHeight:1,padding:2}}>
+              ‹
+            </button>
           </div>
-          <button onClick={function(){setExtCtx(null);}}
-            style={{background:"none",border:"none",cursor:"pointer",
-              color:"#0F766E",fontSize:13,padding:0}}>×</button>
+
+          {/* New chat button */}
+          <div style={{padding:"8px 8px 4px",flexShrink:0}}>
+            <button onClick={onNew}
+              style={{
+                width:"100%",display:"flex",alignItems:"center",gap:6,
+                background:accent,color:"#fff",border:"none",borderRadius:8,
+                padding:"7px 10px",cursor:"pointer",fontFamily:"inherit",
+                fontSize:12,fontWeight:600,
+              }}>
+              <span style={{fontSize:14,fontWeight:400}}>＋</span>
+              New conversation
+            </button>
+          </div>
+
+          {/* Session list */}
+          <div style={{flex:1,overflowY:"auto",padding:"4px 6px"}}>
+            {sessions.slice().reverse().map(function(s){
+              const isA = s.id === activeId;
+              const preview = s.msgs.length > 1
+                ? s.msgs.filter(function(m){return m.role==="user";})[0]
+                  ?.content?.slice(0,45) || s.name
+                : s.name;
+              return (
+                <div key={s.id}
+                  onClick={function(){ if(renaming!==s.id) onSelect(s.id); }}
+                  style={{
+                    display:"flex",alignItems:"flex-start",gap:5,
+                    padding:"7px 8px",borderRadius:7,marginBottom:2,
+                    background:isA ? accent+"15" : "transparent",
+                    borderLeft:"2px solid "+(isA ? accent : "transparent"),
+                    cursor:"pointer",position:"relative",
+                    transition:"background .12s",
+                  }}
+                  onMouseEnter={function(e){
+                    if(!isA) e.currentTarget.style.background="#F1F5F9";
+                  }}
+                  onMouseLeave={function(e){
+                    if(!isA) e.currentTarget.style.background="transparent";
+                  }}>
+                  <div style={{flex:1,minWidth:0}}>
+                    {renaming===s.id ? (
+                      <input
+                        autoFocus
+                        value={renameVal}
+                        onChange={function(e){setRenameVal(e.target.value);}}
+                        onBlur={function(){
+                          if(renameVal.trim()) onRename(s.id, renameVal.trim());
+                          setRenaming(null);
+                        }}
+                        onKeyDown={function(e){
+                          if(e.key==="Enter"){
+                            if(renameVal.trim()) onRename(s.id, renameVal.trim());
+                            setRenaming(null);
+                          }
+                          if(e.key==="Escape") setRenaming(null);
+                        }}
+                        onClick={function(e){e.stopPropagation();}}
+                        style={{width:"100%",fontSize:11,padding:"1px 4px",
+                          borderRadius:4,border:"1px solid "+accent,outline:"none",
+                          fontFamily:"inherit"}}
+                      />
+                    ) : (
+                      <>
+                        <div style={{
+                          fontSize:11.5,fontWeight:isA?600:400,
+                          color:isA?accent:"#374151",
+                          whiteSpace:"nowrap",overflow:"hidden",
+                          textOverflow:"ellipsis",lineHeight:1.3,
+                        }}>
+                          {s.name}
+                        </div>
+                        <div style={{
+                          fontSize:10,color:"#94A3B8",marginTop:2,
+                          whiteSpace:"nowrap",overflow:"hidden",
+                          textOverflow:"ellipsis",
+                        }}>
+                          {preview !== s.name ? preview : (
+                            s.msgs.length>1
+                              ? s.msgs.length-1+" message"+(s.msgs.length>2?"s":"")
+                              : "No messages yet"
+                          )}
+                        </div>
+                      </>
+                    )}
+                  </div>
+
+                  {/* Actions on hover */}
+                  {isA && renaming!==s.id && (
+                    <div style={{display:"flex",gap:2,flexShrink:0}}>
+                      <button
+                        onClick={function(e){
+                          e.stopPropagation();
+                          setRenaming(s.id);
+                          setRenameVal(s.name);
+                        }}
+                        title="Rename"
+                        style={{background:"none",border:"none",cursor:"pointer",
+                          color:"#94A3B8",fontSize:11,padding:"1px 3px",lineHeight:1}}>
+                        ✎
+                      </button>
+                      {sessions.length > 1 && (
+                        <button
+                          onClick={function(e){
+                            e.stopPropagation();
+                            if(window.confirm("Delete this conversation?")) onDelete(s.id);
+                          }}
+                          title="Delete"
+                          style={{background:"none",border:"none",cursor:"pointer",
+                            color:"#94A3B8",fontSize:11,padding:"1px 3px",lineHeight:1}}>
+                          ✕
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Footer */}
+          <div style={{padding:"6px 10px",borderTop:"1px solid #E2E8F0",
+            fontSize:9,color:"#CBD5E1",flexShrink:0}}>
+            {sessions.length} conversation{sessions.length!==1?"s":""}
+          </div>
         </div>
       )}
-      <div style={{flex:1,overflowY:"auto",padding:"14px 18px",
+
+      {/* ── Collapsed sidebar toggle ──────────────────────────────── */}
+      {!sideOpen && (
+        <div style={{
+          width:28,flexShrink:0,
+          background:"#F8FAFC",borderRight:"1px solid #E2E8F0",
+          display:"flex",flexDirection:"column",alignItems:"center",
+          paddingTop:8,gap:6,
+        }}>
+          <button onClick={function(){setSideOpen(true);}}
+            style={{background:"none",border:"none",cursor:"pointer",
+              color:"#94A3B8",fontSize:14,lineHeight:1,padding:2}}>
+            ›
+          </button>
+          <button onClick={onNew}
+            title="New conversation"
+            style={{background:accent,border:"none",borderRadius:5,
+              cursor:"pointer",color:"#fff",fontSize:14,
+              width:20,height:20,display:"flex",alignItems:"center",
+              justifyContent:"center",lineHeight:1,padding:0}}>
+            ＋
+          </button>
+        </div>
+      )}
+
+      {/* ── Active chat ──────────────────────────────────────────── */}
+      <div style={{flex:1,display:"flex",flexDirection:"column",overflow:"hidden"}}>
+        {active
+          ? renderChat(active)
+          : (
+            <div style={{flex:1,display:"flex",alignItems:"center",
+              justifyContent:"center",color:"#94A3B8",fontSize:13}}>
+              Select a conversation or start a new one
+            </div>
+          )
+        }
+      </div>
+    </div>
+  );
+}
+
+// ── Single GenieAI chat instance (rendered inside ChatShell) ─────────────────
+function GenieChatInstance({session, payor, sys, onMsgsChange}) {
+  const welcome = session.msgs[0]?.content || "";
+  const {msgs, busy, err, setErr, send} = useChat(sys, welcome, session.msgs, session.hist);
+  const endRef = useRef(null);
+
+  // Propagate message changes up to session store
+  useEffect(function(){
+    onMsgsChange(session.id, msgs);
+  }, [msgs]);
+
+  useEffect(function(){
+    endRef.current && endRef.current.scrollIntoView({behavior:"smooth"});
+  }, [msgs]);
+
+  return (
+    <div style={{flex:1,display:"flex",flexDirection:"column",overflow:"hidden"}}>
+      <div style={{flex:1,overflowY:"auto",padding:"16px 20px",
         display:"flex",flexDirection:"column",gap:10}}>
-        {msgs.map(function(m){return <Bubble key={m.id} msg={m} accent="#4F46E5"/>;}) }
+        {msgs.map(function(m){ return <Bubble key={m.id} msg={m} accent="#4F46E5"/>; })}
         {err && (
           <div style={{background:"#FEF2F2",border:"1px solid #FECACA",
             borderRadius:8,padding:"8px 12px",color:"#B91C1C",fontSize:12,
@@ -965,26 +1096,132 @@ function QueriesPanel({payor}) {
             Error: {err}
             <button onClick={function(){setErr(null);}}
               style={{marginLeft:"auto",background:"none",border:"none",
-                cursor:"pointer",color:"#B91C1C"}}>X</button>
+                cursor:"pointer",color:"#B91C1C"}}>✕</button>
           </div>
         )}
         {msgs.length<=1 && (
-          <div style={{display:"flex",flexWrap:"wrap",gap:6,marginTop:4}}>
-            {QPILLS.map(function(q,i){
-              return (
-                <button key={i} onClick={function(){send(q);}}
-                  style={{background:"#EEF2FF",color:"#4F46E5",
-                    border:"1px solid #C7D2FE",borderRadius:20,
-                    padding:"5px 12px",fontSize:11.5,cursor:"pointer",
-                    fontFamily:"inherit"}}>{q}</button>
-              );
-            })}
+          <div style={{marginTop:8}}>
+            <div style={{fontSize:12,color:"#94A3B8",marginBottom:10}}>
+              Try asking:
+            </div>
+            <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
+              {QPILLS.map(function(q,i){
+                return (
+                  <button key={i} onClick={function(){send(q);}}
+                    style={{background:"#EEF2FF",color:"#4F46E5",
+                      border:"1px solid #C7D2FE",borderRadius:20,
+                      padding:"5px 12px",fontSize:11.5,cursor:"pointer",
+                      fontFamily:"inherit"}}>{q}</button>
+                );
+              })}
+            </div>
           </div>
         )}
         <div ref={endRef}/>
       </div>
-      <CInput onSend={send} busy={busy} color="#4F46E5" ph="Ask about MA plans..."/>
+      <CInput onSend={send} busy={busy} color="#4F46E5" ph="Ask GenieAI..."/>
     </div>
+  );
+}
+
+function QueriesPanel({payor}) {
+  const ACCENT  = "#4F46E5";
+  const sys     = "You are GenieAI — HealthWorksAI Medicare Advantage intelligence assistant. "
+    +"User is a payor professional from "+payor.label+". "
+    +"\n\n"
+    +"## MEDICARE ADVANTAGE DOMAIN KNOWLEDGE\n"
+    +"A Medicare Advantage plan is uniquely identified by its BID_ID (also written Bid_id). "
+    +"The Bid_id format is: CONTRACT_ID + underscore + PLAN_ID + underscore + SEGMENT_ID "
+    +"(e.g. H0504_041_0 means contract H0504, plan 41, segment 0). "
+    +"IMPORTANT COUNTING RULE: The Stars_Landscape table has ONE ROW PER PLAN-COUNTY combination. "
+    +"When counting plans, ALWAYS count DISTINCT Bid_id values, NOT total rows.\n\n"
+    +"## DATA MODEL\n"
+    +"- Stars_Landscape: plan-county rows, State as FULL NAME ('Florida' not 'FL').\n"
+    +"- HWAI_Enrollment: member enrollment by state/county/month/payor.\n"
+    +"- Stars_Cutpoint: CMS star rating cutpoints by contract.\n"
+    +"- PartD_MRx: Part D formulary tiers (linked via bid_id).\n"
+    +"- PartD_Ranking: top Medicare drugs by spend/claims.\n"
+    +"- TPV_Crosswalk: Total Plan Value YoY 2024/2025/2026.\n"
+    +"- plans: plan comparison data.\n"
+    +"- PC_Dental: dental benefit comparison data.\n\n"
+    +"## CRITICAL INSTRUCTIONS\n"
+    +"1. ALWAYS call a tool — NEVER answer from training knowledge.\n"
+    +"2. For plan counts: use unique_plan_count (deduplicated by Bid_id).\n"
+    +"3. State filter: pass full name e.g. 'Florida', 'Texas'.\n"
+    +"4. Report EXACT numbers from tool results.\n"
+    +"5. Always cite the source table name.\n\n"
+    +"## TOOL ROUTING\n"
+    +"- Plan counts, star ratings → query_landscape_data\n"
+    +"- Enrollment, market share → query_enrollment_data\n"
+    +"- Star cutpoints → query_stars_data\n"
+    +"- Drug tiers (pass bid_id) → query_formulary_data\n"
+    +"- Top drugs → query_drug_rankings\n"
+    +"- Total Plan Value YoY → query_tpv_data\n"
+    +"- Plan comparison → query_plan_comparison\n"
+    +"- Dental benefits → query_dental_comparison\n\n"
+    +GUARDRAILS;
+
+  const welcome = "Welcome, **"+payor.label+"** team! Ask me anything about MA plans, premiums, benefits, or stars.";
+
+  const [sessions,  setSessions]  = useState(function(){ return [makeSession(welcome, "New conversation")]; });
+  const [activeId,  setActiveId]  = useState(function(){ return sessions[0].id; });
+
+  function newChat() {
+    const s = makeSession(welcome, "New conversation");
+    setSessions(function(prev){ return [...prev, s]; });
+    setActiveId(s.id);
+  }
+
+  function renameChat(id, name) {
+    setSessions(function(prev){
+      return prev.map(function(s){ return s.id===id ? Object.assign({},s,{name:name}) : s; });
+    });
+  }
+
+  function deleteChat(id) {
+    setSessions(function(prev){
+      const next = prev.filter(function(s){ return s.id!==id; });
+      if (activeId===id) setActiveId(next[next.length-1].id);
+      return next;
+    });
+  }
+
+  function onMsgsChange(id, msgs) {
+    setSessions(function(prev){
+      return prev.map(function(s){
+        if (s.id!==id) return s;
+        // Auto-name from first user message
+        const firstUser = msgs.find(function(m){return m.role==="user";});
+        const name = firstUser
+          ? firstUser.content.slice(0,40)+(firstUser.content.length>40?"…":"")
+          : s.name;
+        return Object.assign({},s,{msgs:msgs, name:name});
+      });
+    });
+  }
+
+  return (
+    <ChatShell
+      sessions={sessions}
+      activeId={activeId}
+      onSelect={setActiveId}
+      onNew={newChat}
+      onRename={renameChat}
+      onDelete={deleteChat}
+      accent={ACCENT}
+      icon="✨"
+      renderChat={function(session){
+        return (
+          <GenieChatInstance
+            key={session.id}
+            session={session}
+            payor={payor}
+            sys={sys}
+            onMsgsChange={onMsgsChange}
+          />
+        );
+      }}
+    />
   );
 }
 
@@ -1001,62 +1238,156 @@ const RTMPL=[
    p:"Generate a 1-page executive summary for {m} PY2026: key findings, competitive threats, 3 strategic recommendations."},
 ];
 
-function ReportingPanel({payor}) {
-  const [mkt,setMkt]=useState("Florida");
-  const [sel,setSel]=useState(null);
-  const sys="You are MIPI POWER HOUSE - HealthWorksAI MA intelligence for "
-    +payor.label+". Generate well-structured markdown reports. "
-    +"KEY DOMAIN RULE: A Medicare Advantage plan is uniquely identified by its Bid_id "
-    +"(format CONTRACT_ID_PLAN_ID_SEGMENT e.g. H0504_041_0). "
-    +"Stars_Landscape has one row per plan-county — always count DISTINCT Bid_id for plan counts. "
-    +"States stored as full names in DB ('Florida' not 'FL'). "
-    +"Call tools to fetch all data — never use training knowledge for counts or statistics. "
-    +"Generate reports with: executive summary, data tables, key findings, strategic recommendations. "
-    +"Always cite the source table name.\n\n"
-    +GUARDRAILS;
-  const welcome="Ready to build reports for **"+payor.label
-    +"**. Select a template or describe your report below.";
-  const {msgs,busy,err,setErr,send}=useChat(sys,welcome);
-  const endRef=useRef(null);
-  useEffect(function(){endRef.current&&endRef.current.scrollIntoView({behavior:"smooth"});},[msgs]);
+// ── Single report chat instance ───────────────────────────────────────────────
+function ReportChatInstance({session, payor, sys, onMsgsChange}) {
+  const [mkt, setMkt] = useState("Florida");
+  const [sel, setSel] = useState(null);
+  const welcome = session.msgs[0]?.content || "";
+  const {msgs, busy, err, setErr, send} = useChat(sys, welcome, session.msgs, session.hist);
+  const endRef = useRef(null);
+
+  useEffect(function(){
+    onMsgsChange(session.id, msgs);
+  }, [msgs]);
+
+  useEffect(function(){
+    endRef.current && endRef.current.scrollIntoView({behavior:"smooth"});
+  }, [msgs]);
+
   return (
     <div style={{flex:1,display:"flex",flexDirection:"column",overflow:"hidden"}}>
-      <div style={{padding:"12px 18px",background:"#fff",
+      {/* Template bar */}
+      <div style={{padding:"10px 16px",background:"#fff",
         borderBottom:"1px solid #E2E8F0",flexShrink:0}}>
         <div style={{display:"flex",gap:8,alignItems:"center",marginBottom:8}}>
+          <span style={{fontSize:11,color:"#64748B",fontWeight:600}}>Market:</span>
           <select value={mkt} onChange={function(e){setMkt(e.target.value);}}
-            style={{background:"#F8FAFC",border:"1px solid #E2E8F0",borderRadius:8,
-              padding:"6px 10px",fontSize:13,color:"#1E293B",fontFamily:"inherit"}}>
+            style={{background:"#F8FAFC",border:"1px solid #E2E8F0",borderRadius:7,
+              padding:"4px 8px",fontSize:12,color:"#1E293B",fontFamily:"inherit"}}>
             <option>Florida</option><option>Texas</option>
             <option>California</option><option>National (CA+FL+TX)</option>
           </select>
         </div>
-        <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+        <div style={{display:"flex",gap:5,flexWrap:"wrap"}}>
           {RTMPL.map(function(t){
+            const isA = sel===t.id;
             return (
               <button key={t.id} disabled={busy}
-                onClick={function(){setSel(t.id);send(t.p.replace("{m}",mkt));}}
-                style={{display:"flex",alignItems:"center",gap:5,
-                  background:sel===t.id?"#0891B2":"#ECFEFF",
-                  color:sel===t.id?"#fff":"#0E7490",
-                  border:"1px solid "+(sel===t.id?"#0891B2":"#A5F3FC"),
-                  borderRadius:20,padding:"5px 11px",fontSize:11.5,
-                  cursor:busy?"not-allowed":"pointer",fontFamily:"inherit"}}>
+                onClick={function(){setSel(t.id); send(t.p.replace("{m}",mkt));}}
+                style={{display:"flex",alignItems:"center",gap:4,
+                  background:isA?"#0891B2":"#ECFEFF",
+                  color:isA?"#fff":"#0E7490",
+                  border:"1px solid "+(isA?"#0891B2":"#A5F3FC"),
+                  borderRadius:20,padding:"4px 10px",fontSize:11,
+                  cursor:busy?"not-allowed":"pointer",fontFamily:"inherit",
+                  transition:"all .15s"}}>
                 <span>{t.icon}</span>{t.label}
               </button>
             );
           })}
         </div>
       </div>
-      <div style={{flex:1,overflowY:"auto",padding:"14px 18px",
+
+      {/* Messages */}
+      <div style={{flex:1,overflowY:"auto",padding:"16px 20px",
         display:"flex",flexDirection:"column",gap:10}}>
-        {msgs.map(function(m){return <Bubble key={m.id} msg={m} accent="#0891B2"/>;}) }
-        {err && <div style={{background:"#FEF2F2",border:"1px solid #FECACA",
-          borderRadius:8,padding:"8px",color:"#B91C1C",fontSize:12}}>Error: {err}</div>}
+        {msgs.map(function(m){ return <Bubble key={m.id} msg={m} accent="#0891B2"/>; })}
+        {err && (
+          <div style={{background:"#FEF2F2",border:"1px solid #FECACA",
+            borderRadius:8,padding:"8px 12px",color:"#B91C1C",fontSize:12,
+            display:"flex",gap:8}}>
+            Error: {err}
+            <button onClick={function(){setErr(null);}}
+              style={{marginLeft:"auto",background:"none",border:"none",
+                cursor:"pointer",color:"#B91C1C"}}>✕</button>
+          </div>
+        )}
+        {msgs.length<=1 && (
+          <div style={{color:"#94A3B8",fontSize:12,marginTop:8}}>
+            Select a report template above or describe a custom report below.
+          </div>
+        )}
         <div ref={endRef}/>
       </div>
+
       <CInput onSend={send} busy={busy} color="#0891B2" ph="Describe a custom report..."/>
     </div>
+  );
+}
+
+function ReportingPanel({payor}) {
+  const ACCENT  = "#0891B2";
+  const sys     = "You are MIPI POWER HOUSE - HealthWorksAI MA intelligence for "
+    +payor.label+". Generate well-structured markdown reports. "
+    +"KEY DOMAIN RULE: A Medicare Advantage plan is uniquely identified by its Bid_id "
+    +"(format CONTRACT_ID_PLAN_ID_SEGMENT e.g. H0504_041_0). "
+    +"Stars_Landscape has one row per plan-county — always count DISTINCT Bid_id. "
+    +"States stored as full names in DB ('Florida' not 'FL'). "
+    +"Call tools to fetch all data. Generate reports with executive summary, "
+    +"data tables, key findings, strategic recommendations. Always cite sources.\n\n"
+    +GUARDRAILS;
+
+  const welcome = "Ready to build reports for **"+payor.label
+    +"**. Select a template above or describe your report below.";
+
+  const [sessions,  setSessions]  = useState(function(){ return [makeSession(welcome, "New report")]; });
+  const [activeId,  setActiveId]  = useState(function(){ return sessions[0].id; });
+
+  function newChat() {
+    const s = makeSession(welcome, "New report");
+    setSessions(function(prev){ return [...prev, s]; });
+    setActiveId(s.id);
+  }
+
+  function renameChat(id, name) {
+    setSessions(function(prev){
+      return prev.map(function(s){ return s.id===id ? Object.assign({},s,{name:name}) : s; });
+    });
+  }
+
+  function deleteChat(id) {
+    setSessions(function(prev){
+      const next = prev.filter(function(s){ return s.id!==id; });
+      if (activeId===id) setActiveId(next[next.length-1].id);
+      return next;
+    });
+  }
+
+  function onMsgsChange(id, msgs) {
+    setSessions(function(prev){
+      return prev.map(function(s){
+        if (s.id!==id) return s;
+        const firstUser = msgs.find(function(m){return m.role==="user";});
+        const name = firstUser
+          ? firstUser.content.slice(0,40)+(firstUser.content.length>40?"…":"")
+          : s.name;
+        return Object.assign({},s,{msgs:msgs, name:name});
+      });
+    });
+  }
+
+  return (
+    <ChatShell
+      sessions={sessions}
+      activeId={activeId}
+      onSelect={setActiveId}
+      onNew={newChat}
+      onRename={renameChat}
+      onDelete={deleteChat}
+      accent={ACCENT}
+      icon="📑"
+      renderChat={function(session){
+        return (
+          <ReportChatInstance
+            key={session.id}
+            session={session}
+            payor={payor}
+            sys={sys}
+            onMsgsChange={onMsgsChange}
+          />
+        );
+      }}
+    />
   );
 }
 
