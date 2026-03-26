@@ -187,20 +187,40 @@ async function processPdf(filename) {
 
 // ── Stats ─────────────────────────────────────────────────────────────────────
 async function showStats() {
-  const { data } = await db.from("document_chunks").select("doc_name, doc_type");
-  if (!data || data.length === 0) {
+  // Paginate to get ALL rows past Supabase's 1000 row default limit
+  var allRows = [];
+  var page    = 0;
+  var PAGE    = 1000;
+  while (true) {
+    var res = await db.from("document_chunks")
+      .select("doc_name, doc_type")
+      .range(page * PAGE, (page + 1) * PAGE - 1);
+    if (!res.data || res.data.length === 0) break;
+    allRows = allRows.concat(res.data);
+    if (res.data.length < PAGE) break;
+    page++;
+  }
+
+  if (allRows.length === 0) {
     console.log("\n📭  No chunks ingested yet.\n"); return;
   }
-  const byDoc = {};
-  data.forEach(r => {
+
+  var byDoc = {};
+  allRows.forEach(function(r) {
     if (!byDoc[r.doc_name]) byDoc[r.doc_name] = { type: r.doc_type, count: 0 };
     byDoc[r.doc_name].count++;
   });
+
+  var docs   = Object.entries(byDoc).sort(function(a,b){ return a[0].localeCompare(b[0]); });
+  var eoc    = docs.filter(function(d){ return d[1].type==="eoc"; });
+  var dental = docs.filter(function(d){ return d[1].type==="dental"; });
+
   console.log("\n── Ingested Documents ──────────────────────────────────────");
-  Object.entries(byDoc).forEach(([name, info]) => {
-    console.log(`  [${info.type.toUpperCase().padEnd(6)}] ${name.padEnd(55)} ${info.count} chunks`);
+  docs.forEach(function(d) {
+    var name = d[0], info = d[1];
+    console.log("  ["+info.type.toUpperCase().padEnd(6)+"] "+name.padEnd(55)+" "+info.count+" chunks");
   });
-  console.log(`\n  Total: ${Object.keys(byDoc).length} docs | ${data.length} chunks`);
+  console.log("\n  EOC: "+eoc.length+" | Dental: "+dental.length+" | Total: "+docs.length+" docs | "+allRows.length+" chunks");
   console.log("  ✅  EOC & Dental Playground is ready!\n");
 }
 
