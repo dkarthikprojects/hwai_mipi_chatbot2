@@ -1,6 +1,6 @@
 // api/chat.js — Vercel serverless proxy for OpenAI API
-// Translates Anthropic-format requests → OpenAI → back to Anthropic format.
-// Tool calls resolved directly via Supabase (no HTTP self-call).
+// KEY FIX: tool results return SUMMARY STATS only (not full row arrays)
+// so GPT-4o context stays small and responses are fast.
 
 import { createClient } from "@supabase/supabase-js";
 
@@ -24,48 +24,60 @@ function dedupByBid(rows, limit) {
   return out;
 }
 
-// ── Query handlers ────────────────────────────────────────────────────────────
+// ── Query handlers — return SUMMARY ONLY to keep token count low ─────────────
 
 async function queryLandscape(db, p) {
   const stateList = p.states || (p.state ? [p.state] : null);
-  // Avoid columns with % in name — they break the Supabase JS select parser
   let q = db.from("Stars_Landscape").select(
-    "Bid_id,CONTRACT_ID,Plan_ID,Plan_Name,parent_organization," +
-    "State,County,Star_Rating,Bench_mark,Crosswalk,year"
+    "Bid_id,parent_organization,State,Star_Rating,Bench_mark"
   );
   if (stateList && stateList.length) q = q.in("State", stateList);
-  if (p.county)     q = q.ilike("County",               `%${p.county}%`);
-  if (p.parent_org) q = q.ilike("parent_organization",  `%${p.parent_org}%`);
-  if (p.min_stars)  q = q.gte("Star_Rating",             String(p.min_stars));
-  const { data: raw, error } = await q
-    .order("Bid_id").limit((p.limit || 50) * 20);
+  if (p.county)     q = q.ilike("County",              `%${p.county}%`);
+  if (p.parent_org) q = q.ilike("parent_organization", `%${p.parent_org}%`);
+  if (p.min_stars)  q = q.gte("Star_Rating",            String(p.min_stars));
+
+  const { data: raw, error } = await q.order("Bid_id").limit(5000);
   if (error) throw new Error("Stars_Landscape: " + error.message);
-  const plans    = dedupByBid(raw, p.limit || 50);
+
+  const plans    = dedupByBid(raw, 9999);
   const starNums = plans.map(r => parseFloat(r.Star_Rating)).filter(n => !isNaN(n));
   const avgStar  = starNums.length
-    ? (starNums.reduce((a, b) => a + b, 0) / starNums.length).toFixed(2)
-    : null;
+    ? (starNums.reduce((a, b) => a + b, 0) / starNums.length).toFixed(2) : null;
   const fourPlus = starNums.filter(s => s >= 4).length;
+
+  // Payor breakdown — top 10 only
+  const byOrg = {};
+  plans.forEach(r => {
+    byOrg[r.parent_organization] = (byOrg[r.parent_organization] || 0) + 1;
+  });
+  const topPayors = Object.entries(byOrg)
+    .sort((a, b) => b[1] - a[1]).slice(0, 10)
+    .map(([org, cnt]) => ({ org, plan_count: cnt }));
+
+  // State breakdown
+  const byState = {};
+  plans.forEach(r => { byState[r.State] = (byState[r.State] || 0) + 1; });
+
   return {
-    summary: {
-      unique_plan_count: plans.length,
-      unique_payors:     new Set(plans.map(r => r.parent_organization)).size,
-      avg_star_rating:   avgStar,
-      four_plus_stars:   fourPlus,
-      four_plus_pct:     plans.length
-        ? ((fourPlus / plans.length) * 100).toFixed(1) + "%" : "0%",
-    },
-    plans,
-    source: "HealthWorksAI Supabase — Stars_Landscape",
+    unique_plan_count: plans.length,
+    unique_payors:     Object.keys(byOrg).length,
+    avg_star_rating:   avgStar,
+    four_plus_count:   fourPlus,
+    four_plus_pct:     plans.length
+      ? ((fourPlus / plans.length) * 100).toFixed(1) + "%" : "0%",
+    by_state:          byState,
+    top_payors:        topPayors,
+    filters_applied:   { states: stateList, county: p.county || null,
+                         parent_org: p.parent_org || null },
+    source: "Stars_Landscape table — unique plans by Bid_id",
   };
 }
 
 async function queryEnrollment(db, p) {
   const stateList = p.states || (p.state ? [p.state] : null);
   let q = db.from("HWAI_Enrollment").select(
-    "State,County,CPID,Month,Year,Parent_Organization," +
-    "Plan_Type,Plan_Name,Special_Needs_Plan_Type," +
-    "DSNP_Eligible,MA_Eligible,Enrollment"
+    "State,Parent_Organization,Plan_Type,Special_Needs_Plan_Type," +
+    "DSNP_Eligible,MA_Eligible,Enrollment,Month,Year"
   );
   if (stateList && stateList.length) q = q.in("State", stateList);
   if (p.county)     q = q.ilike("County",                  `%${p.county}%`);
@@ -74,110 +86,113 @@ async function queryEnrollment(db, p) {
   if (p.snp_type)   q = q.ilike("Special_Needs_Plan_Type", `%${p.snp_type}%`);
   if (p.month)      q = q.eq("Month", p.month);
   if (p.year)       q = q.eq("Year",  p.year);
-  const { data, error } = await q
-    .order("Enrollment", { ascending: false }).limit(p.limit || 200);
+
+  const { data, error } = await q.limit(5000);
   if (error) throw new Error("HWAI_Enrollment: " + error.message);
-  const total = data.reduce((s, r) => s + (r.Enrollment || 0), 0);
+
+  const total    = data.reduce((s, r) => s + (Number(r.Enrollment)   || 0), 0);
+  const totalMA  = data.reduce((s, r) => s + (Number(r.MA_Eligible)  || 0), 0);
+  const totalDSNP= data.reduce((s, r) => s + (Number(r.DSNP_Eligible)|| 0), 0);
+
   const byOrg = {};
   data.forEach(r => {
     byOrg[r.Parent_Organization] =
-      (byOrg[r.Parent_Organization] || 0) + (r.Enrollment || 0);
+      (byOrg[r.Parent_Organization] || 0) + (Number(r.Enrollment) || 0);
   });
   const topPayors = Object.entries(byOrg)
     .sort((a, b) => b[1] - a[1]).slice(0, 10)
-    .map(([payor, count]) => ({
-      payor,
-      enrollment: count.toLocaleString(),
-      share_pct:  total ? ((count / total) * 100).toFixed(1) + "%" : "0%",
+    .map(([payor, cnt]) => ({
+      payor, enrollment: cnt.toLocaleString(),
+      share_pct: total ? ((cnt / total) * 100).toFixed(1) + "%" : "0%",
     }));
+
   return {
-    records:          data,
-    total_enrollment: total.toLocaleString(),
-    top_payors:       topPayors,
-    source: "HealthWorksAI Supabase — HWAI_Enrollment",
+    total_enrollment:    total.toLocaleString(),
+    total_ma_eligible:   totalMA.toLocaleString(),
+    total_dsnp_eligible: totalDSNP.toLocaleString(),
+    top_payors:          topPayors,
+    filters_applied:     { states: stateList, month: p.month || null },
+    source: "HWAI_Enrollment table",
   };
 }
 
 async function queryStars(db, p) {
-  // Use safe column aliases to avoid spaces in names
-  let q = db.from("Stars_Cutpoint").select(
-    "CONTRACT_ID,Year"
-  );
+  let q = db.from("Stars_Cutpoint").select("CONTRACT_ID,Year");
   if (p.contract_id) q = q.eq("CONTRACT_ID", p.contract_id);
   if (p.year)        q = q.eq("Year", p.year);
-  const { data, error } = await q
-    .order("CONTRACT_ID").limit(p.limit || 200);
+  const { data, error } = await q.limit(2000);
   if (error) throw new Error("Stars_Cutpoint: " + error.message);
   return {
-    measures:          data,
-    total_records:     data.length,
-    unique_contracts:  new Set(data.map(r => r.CONTRACT_ID)).size,
-    source: "HealthWorksAI Supabase — Stars_Cutpoint",
+    total_records:    data.length,
+    unique_contracts: new Set(data.map(r => r.CONTRACT_ID)).size,
+    source: "Stars_Cutpoint table",
   };
 }
 
 async function queryFormulary(db, p) {
-  let q = db.from("PartD_MRx").select(
-    "bid_id,Tier,Benefit,BenefitValue"
-  );
-  if (p.bid_id)  q = q.eq("bid_id",  p.bid_id);
-  if (p.tier)    q = q.eq("Tier",    String(p.tier));
+  let q = db.from("PartD_MRx").select("bid_id,Tier,Benefit,BenefitValue");
+  if (p.bid_id)  q = q.eq("bid_id", p.bid_id);
+  if (p.tier)    q = q.eq("Tier", String(p.tier));
   if (p.benefit) q = q.ilike("Benefit", `%${p.benefit}%`);
-  const { data, error } = await q.order("Tier").limit(p.limit || 100);
+  const { data, error } = await q.order("Tier").limit(200);
   if (error) throw new Error("PartD_MRx: " + error.message);
   const tierDist = {};
   data.forEach(r => { tierDist[r.Tier] = (tierDist[r.Tier] || 0) + 1; });
   return {
-    formulary:         data,
-    total:             data.length,
-    tier_distribution: tierDist,
-    source: "HealthWorksAI Supabase — PartD_MRx",
+    total: data.length, tier_distribution: tierDist,
+    // Only return first 20 rows to keep context small
+    sample_rows: data.slice(0, 20),
+    source: "PartD_MRx table",
   };
 }
 
 async function queryDrugRankings(db, p) {
   let q = db.from("PartD_Ranking").select(
-    "rxcui,rxnorm_description,prime_disease," +
-    "total_spending,total_claims,total_beneficiaries,Brand_Name,Brand_YN"
+    "rxnorm_description,prime_disease,total_spending,total_claims," +
+    "total_beneficiaries,Brand_Name,Brand_YN"
   );
-  if (p.disease)   q = q.ilike("prime_disease",       `%${p.disease}%`);
-  if (p.brand_yn)  q = q.eq("Brand_YN",               p.brand_yn);
-  if (p.drug_name) q = q.ilike("rxnorm_description",  `%${p.drug_name}%`);
+  if (p.disease)   q = q.ilike("prime_disease",      `%${p.disease}%`);
+  if (p.brand_yn)  q = q.eq("Brand_YN",              p.brand_yn);
+  if (p.drug_name) q = q.ilike("rxnorm_description", `%${p.drug_name}%`);
   const { data, error } = await q
-    .order("total_beneficiaries", { ascending: false }).limit(p.limit || 50);
+    .order("total_beneficiaries", { ascending: false }).limit(20);
   if (error) throw new Error("PartD_Ranking: " + error.message);
-  return {
-    drugs:  data,
-    total:  data.length,
-    source: "HealthWorksAI Supabase — PartD_Ranking",
-  };
+  return { top_drugs: data, total: data.length, source: "PartD_Ranking table" };
 }
 
 async function queryTPV(db, p) {
   const stateList = p.states || (p.state ? [p.state] : null);
   let q = db.from("TPV_Crosswalk").select(
-    "State,County,bid_id,Plan_Name,plan_type,parent_organization," +
-    "SNP,Special_Needs_Plan_Type,CPID_2026,flag," +
-    "DVH,OTC,Inpatient,Transport,SSBCI," +
+    "bid_id,State,Plan_Name,plan_type,parent_organization," +
+    "SNP,Special_Needs_Plan_Type,DVH,OTC,Inpatient,Transport,SSBCI," +
     "Feb_enrollments,Dec_enrollments"
   );
   if (stateList && stateList.length) q = q.in("State", stateList);
   if (p.county)     q = q.ilike("County",               `%${p.county}%`);
   if (p.parent_org) q = q.ilike("parent_organization",  `%${p.parent_org}%`);
   if (p.plan_type)  q = q.ilike("plan_type",            `%${p.plan_type}%`);
-  if (p.snp_type)   q = q.ilike("Special_Needs_Plan_Type", `%${p.snp_type}%`);
-  const { data: raw, error } = await q
-    .order("bid_id").limit((p.limit || 100) * 10);
+
+  const { data: raw, error } = await q.limit(5000);
   if (error) throw new Error("TPV_Crosswalk: " + error.message);
+
   const seen = new Set(), plans = [];
   for (const r of raw) {
     if (!seen.has(r.bid_id)) { seen.add(r.bid_id); plans.push(r); }
-    if (plans.length >= (p.limit || 100)) break;
   }
+
+  const byOrg = {};
+  plans.forEach(r => {
+    byOrg[r.parent_organization] = (byOrg[r.parent_organization] || 0) + 1;
+  });
+  const topPayors = Object.entries(byOrg)
+    .sort((a, b) => b[1] - a[1]).slice(0, 10)
+    .map(([org, cnt]) => ({ org, plan_count: cnt }));
+
   return {
-    plans,
     unique_plan_count: plans.length,
-    source: "HealthWorksAI Supabase — TPV_Crosswalk",
+    top_payors:        topPayors,
+    sample_plans:      plans.slice(0, 10),
+    source: "TPV_Crosswalk table",
   };
 }
 
@@ -193,19 +208,17 @@ const HANDLERS = {
 
 async function resolveToolCall(name, input) {
   const db = getDB();
-  if (!db) return { note: "Supabase not configured", tool: name };
+  if (!db) return { error: "Supabase not configured", tool: name };
   const fn = HANDLERS[name];
-  if (!fn) return { note: "Unknown tool: " + name };
+  if (!fn) return { error: "Unknown tool: " + name };
   try {
     return await fn(db, input || {});
   } catch (e) {
     console.error("[tool/" + name + "]", e.message);
-    // Return error as data so GPT-4o can report it gracefully
     return { error: e.message, tool: name };
   }
 }
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
 async function openaiCall(apiKey, body) {
   const res = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
@@ -215,14 +228,61 @@ async function openaiCall(apiKey, body) {
     },
     body: JSON.stringify(body),
   });
-  const data = await res.json();
+  const data = await res.json().catch(() => ({}));
   if (!res.ok) {
-    throw new Error(
-      "OpenAI " + res.status + ": " +
-      (data.error && data.error.message ? data.error.message : JSON.stringify(data))
-    );
+    const msg = data.error && data.error.message
+      ? data.error.message
+      : "HTTP " + res.status;
+    throw new Error("OpenAI: " + msg);
   }
   return data;
+}
+
+// ── Anthropic → OpenAI message conversion ────────────────────────────────────
+function convertMessages(messages) {
+  const out = [];
+  for (const msg of messages) {
+    if (msg.role === "user") {
+      if (Array.isArray(msg.content)) {
+        const toolResults = msg.content.filter(b => b.type === "tool_result");
+        if (toolResults.length > 0) {
+          for (const tr of toolResults) {
+            out.push({
+              role: "tool",
+              tool_call_id: tr.tool_use_id,
+              content: typeof tr.content === "string"
+                ? tr.content : JSON.stringify(tr.content),
+            });
+          }
+        } else {
+          out.push({ role: "user", content: msg.content });
+        }
+      } else {
+        out.push({ role: "user", content: msg.content });
+      }
+    } else if (msg.role === "assistant") {
+      if (Array.isArray(msg.content)) {
+        const textBlocks    = msg.content.filter(b => b.type === "text");
+        const toolUseBlocks = msg.content.filter(b => b.type === "tool_use");
+        const m = {
+          role:    "assistant",
+          content: textBlocks.length
+            ? textBlocks.map(b => b.text).join("\n") : null,
+        };
+        if (toolUseBlocks.length > 0) {
+          m.tool_calls = toolUseBlocks.map(b => ({
+            id:       b.id,
+            type:     "function",
+            function: { name: b.name, arguments: JSON.stringify(b.input || {}) },
+          }));
+        }
+        out.push(m);
+      } else {
+        out.push({ role: "assistant", content: msg.content });
+      }
+    }
+  }
+  return out;
 }
 
 // ── Main handler ──────────────────────────────────────────────────────────────
@@ -236,62 +296,16 @@ export default async function handler(req, res) {
 
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
-    return res.status(500).json({
-      error: "OPENAI_API_KEY is not set.",
-      fix:   "Add it in Vercel → Project → Settings → Environment Variables.",
-    });
+    return res.status(500).json({ error: "OPENAI_API_KEY is not set." });
   }
 
   const { messages, system, tools, model, max_tokens } = req.body || {};
   if (!messages) return res.status(400).json({ error: "messages required" });
 
-  // ── Convert Anthropic → OpenAI message format ─────────────────────────────
   const oaiMessages = [];
   if (system) oaiMessages.push({ role: "system", content: system });
+  oaiMessages.push(...convertMessages(messages));
 
-  for (const msg of messages) {
-    if (msg.role === "user") {
-      if (Array.isArray(msg.content)) {
-        const toolResults = msg.content.filter(b => b.type === "tool_result");
-        if (toolResults.length > 0) {
-          for (const tr of toolResults) {
-            oaiMessages.push({
-              role: "tool",
-              tool_call_id: tr.tool_use_id,
-              content: typeof tr.content === "string"
-                ? tr.content : JSON.stringify(tr.content),
-            });
-          }
-        } else {
-          oaiMessages.push({ role: "user", content: msg.content });
-        }
-      } else {
-        oaiMessages.push({ role: "user", content: msg.content });
-      }
-    } else if (msg.role === "assistant") {
-      if (Array.isArray(msg.content)) {
-        const textBlocks    = msg.content.filter(b => b.type === "text");
-        const toolUseBlocks = msg.content.filter(b => b.type === "tool_use");
-        const oaiMsg = {
-          role:    "assistant",
-          content: textBlocks.length
-            ? textBlocks.map(b => b.text).join("\n") : null,
-        };
-        if (toolUseBlocks.length > 0) {
-          oaiMsg.tool_calls = toolUseBlocks.map(b => ({
-            id:       b.id,
-            type:     "function",
-            function: { name: b.name, arguments: JSON.stringify(b.input || {}) },
-          }));
-        }
-        oaiMessages.push(oaiMsg);
-      } else {
-        oaiMessages.push({ role: "assistant", content: msg.content });
-      }
-    }
-  }
-
-  // ── Convert Anthropic tools → OpenAI tools ───────────────────────────────
   const oaiTools = tools && tools.length > 0
     ? tools.map(t => ({
         type: "function",
@@ -310,38 +324,35 @@ export default async function handler(req, res) {
   if (oaiTools) { baseBody.tools = oaiTools; baseBody.tool_choice = "auto"; }
 
   try {
-    // ── First OpenAI call ─────────────────────────────────────────────────
+    // ── First call ────────────────────────────────────────────────────────
     const firstData = await openaiCall(apiKey, {
-      ...baseBody,
-      messages: oaiMessages,
+      ...baseBody, messages: oaiMessages,
     });
 
-    const choice     = firstData.choices && firstData.choices[0];
-    const firstMsg   = choice && choice.message;
-    const stopReason = choice && choice.finish_reason;
-    const content    = [];
+    const firstChoice  = firstData.choices && firstData.choices[0];
+    const firstMsg     = firstChoice && firstChoice.message;
+    const stopReason   = firstChoice && firstChoice.finish_reason;
+    const content      = [];
 
     if (firstMsg && firstMsg.content) {
       content.push({ type: "text", text: firstMsg.content });
     }
 
-    // ── Resolve tool calls and make second OpenAI call ────────────────────
+    // ── Tool call path ────────────────────────────────────────────────────
     if (firstMsg && firstMsg.tool_calls && firstMsg.tool_calls.length > 0) {
 
-      // Step 1: run all tool calls and collect results
       const toolResultMsgs = [];
       for (const tc of firstMsg.tool_calls) {
         let parsedInput = {};
-        try { parsedInput = JSON.parse(tc.function.arguments || "{}"); } catch (_) {}
+        try { parsedInput = JSON.parse(tc.function.arguments || "{}"); }
+        catch (_) {}
 
         const toolResult = await resolveToolCall(tc.function.name, parsedInput);
+        console.log("[tool]", tc.function.name, "→ keys:", Object.keys(toolResult));
 
-        // Expose to frontend as a chip in the chat bubble
         content.push({
-          type:  "tool_use",
-          id:    tc.id,
-          name:  tc.function.name,
-          input: parsedInput,
+          type: "tool_use", id: tc.id,
+          name: tc.function.name, input: parsedInput,
         });
 
         toolResultMsgs.push({
@@ -351,31 +362,69 @@ export default async function handler(req, res) {
         });
       }
 
-      // Step 2: second call with CORRECT message order:
-      //   [...original messages] → [assistant + tool_calls] → [tool results]
-      const secondData = await openaiCall(apiKey, {
-        ...baseBody,
-        messages: [
-          ...oaiMessages,
-          // assistant message that triggered the tool calls
-          {
-            role:         "assistant",
-            content:      firstMsg.content || null,
-            tool_calls:   firstMsg.tool_calls,
-          },
-          // tool results immediately after
-          ...toolResultMsgs,
-        ],
-      });
+      // ── Second call: system + history + assistant(tool_calls) + tool results
+      const secondMessages = [
+        ...oaiMessages,
+        {
+          role:       "assistant",
+          content:    firstMsg.content || null,
+          tool_calls: firstMsg.tool_calls,
+        },
+        ...toolResultMsgs,
+      ];
 
-      const secondMsg = secondData.choices &&
-        secondData.choices[0] &&
-        secondData.choices[0].message;
+      try {
+        const secondData = await openaiCall(apiKey, {
+          ...baseBody,
+          messages: secondMessages,
+          // Remove tools on second call so GPT-4o returns text, not another tool call
+          tools:       undefined,
+          tool_choice: undefined,
+        });
 
-      if (secondMsg && secondMsg.content) {
-        // Prepend so the final answer appears first in the response
-        content.unshift({ type: "text", text: secondMsg.content });
+        const secondMsg = secondData.choices &&
+          secondData.choices[0] &&
+          secondData.choices[0].message;
+
+        if (secondMsg && secondMsg.content) {
+          content.unshift({ type: "text", text: secondMsg.content });
+        } else {
+          // Fallback: GPT-4o returned no text — generate a plain summary
+          const fallback = await openaiCall(apiKey, {
+            model:      baseBody.model,
+            max_tokens: 500,
+            messages: [
+              {
+                role:    "user",
+                content: "Based on this data, give a short plain-English answer:\n"
+                  + toolResultMsgs.map(t => t.content).join("\n"),
+              },
+            ],
+          });
+          const fbMsg = fallback.choices &&
+            fallback.choices[0] &&
+            fallback.choices[0].message;
+          if (fbMsg && fbMsg.content) {
+            content.unshift({ type: "text", text: fbMsg.content });
+          }
+        }
+      } catch (secondErr) {
+        console.error("[second call]", secondErr.message);
+        content.unshift({
+          type: "text",
+          text: "Data retrieved successfully. Error formatting response: "
+            + secondErr.message,
+        });
       }
+    }
+
+    // If still no text content, add a fallback message
+    if (!content.some(c => c.type === "text")) {
+      content.unshift({
+        type: "text",
+        text: "I retrieved the data but could not generate a response. "
+          + "Please try rephrasing your question.",
+      });
     }
 
     const anthropicStop =
@@ -391,10 +440,7 @@ export default async function handler(req, res) {
     });
 
   } catch (err) {
-    console.error("[chat] error:", err.message);
-    return res.status(500).json({
-      error:  err.message,   // surface the real error, not just "Proxy failed"
-      detail: err.stack,
-    });
+    console.error("[chat]", err.message);
+    return res.status(500).json({ error: err.message });
   }
 }
