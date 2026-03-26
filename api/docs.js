@@ -1,227 +1,145 @@
-// api/docs.js — MIPI POWER HOUSE Document Intelligence API
-//
-// Handles three actions:
-//   stats  → returns doc counts from document_chunks table
-//   query  → embeds the user question, searches pgvector, GPT-4o answers
-//
-// Architecture:
-//   1. User question → OpenAI text-embedding-3-small → 1536-dim vector
-//   2. pgvector cosine similarity search → top 5 most relevant chunks
-//   3. Chunks + question → GPT-4o → answer with citations
-//
-// Prerequisites in Supabase:
-//   - pgvector extension enabled
-//   - document_chunks table (see db/schema_docs.sql)
-//   - Documents ingested via scripts/ingest_docs.js
+// api/docs.js — EOC & Dental Playground RAG API
+// Queries document_chunks table using pgvector similarity search
+// then passes relevant chunks to GPT-4o for citation-aware answers.
+
+import { createClient } from "@supabase/supabase-js";
 
 export const config = { api: { bodyParser: true } };
 
-const EMBED_MODEL = "text-embedding-3-small";
-const CHAT_MODEL  = "gpt-4o";
-const TOP_K       = 5;   // chunks to retrieve per query
-const MAX_CHUNK   = 800; // chars shown in citation preview
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
-function getEnv() {
-  const openaiKey  = process.env.OPENAI_API_KEY;
-  const supaUrl    = process.env.SUPABASE_URL;
-  const supaKey    = process.env.SUPABASE_SERVICE_KEY;
-  if (!openaiKey) throw new Error("OPENAI_API_KEY not set");
-  if (!supaUrl || !supaKey)
-    throw new Error("SUPABASE_URL / SUPABASE_SERVICE_KEY not set");
-  return { openaiKey, supaUrl, supaKey };
+function getDB() {
+  const url = process.env.SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_KEY;
+  if (!url || !key) return null;
+  return createClient(url, key, { auth: { persistSession: false } });
 }
 
-// Embed a text string using OpenAI
-async function embed(text, apiKey) {
+// ── Embed a question via OpenAI ───────────────────────────────────────────────
+async function embed(text) {
+  const apiKey = process.env.OPENAI_API_KEY;
   const res = await fetch("https://api.openai.com/v1/embeddings", {
     method: "POST",
     headers: {
       "Content-Type":  "application/json",
       "Authorization": "Bearer " + apiKey,
     },
-    body: JSON.stringify({ model: EMBED_MODEL, input: text }),
+    body: JSON.stringify({
+      model: "text-embedding-3-small",
+      input: text,
+    }),
   });
-  if (!res.ok) {
-    const e = await res.json();
-    throw new Error("Embedding failed: " + (e.error?.message || res.status));
-  }
   const d = await res.json();
-  return d.data[0].embedding; // float[] length 1536
+  if (!res.ok) throw new Error("Embed failed: " + (d.error?.message || res.status));
+  return d.data[0].embedding;
 }
 
-// Vector similarity search via Supabase RPC
-async function searchChunks(embedding, docType, supaUrl, supaKey) {
-  const body = {
-    query_embedding: embedding,
-    match_count:     TOP_K,
-    doc_type_filter: docType === "all" ? null : docType,
-  };
-  const res = await fetch(
-    supaUrl + "/rest/v1/rpc/match_document_chunks",
-    {
-      method: "POST",
-      headers: {
-        "Content-Type":  "application/json",
-        "apikey":        supaKey,
-        "Authorization": "Bearer " + supaKey,
-      },
-      body: JSON.stringify(body),
-    }
-  );
-  if (!res.ok) {
-    const e = await res.json();
-    throw new Error("Vector search failed: " + JSON.stringify(e));
-  }
-  return res.json(); // array of matching chunk rows
-}
-
-// Build the GPT-4o prompt from retrieved chunks
-function buildPrompt(question, chunks) {
-  const context = chunks.map(function(c, i) {
-    return [
-      "--- Source " + (i+1) + " ---",
-      "Document: " + c.doc_name,
-      "Type: "     + c.doc_type.toUpperCase(),
-      "Plan: "     + (c.plan_name || "N/A"),
-      "Payor: "    + (c.parent_org || "N/A"),
-      "Page: "     + (c.page_number || "?"),
-      "Section: "  + (c.section || "General"),
-      "",
-      c.chunk_text,
-    ].join("\n");
-  }).join("\n\n");
-
-  return [
-    "You are an expert Medicare Advantage plan document analyst for HealthWorksAI.",
-    "Answer the user's question using ONLY the document excerpts provided below.",
-    "Rules:",
-    "- Ground every claim in a specific source excerpt.",
-    "- Always cite: document name, page number, and section.",
-    "- If the answer is not in the excerpts, say so clearly.",
-    "- Flag exclusions, limitations, waiting periods, and prior auth requirements.",
-    "- Be concise and specific. Use bullet points for lists of terms.",
-    "- Do not invent or extrapolate beyond what the documents say.",
-    "",
-    "DOCUMENT EXCERPTS:",
-    context,
-    "",
-    "USER QUESTION: " + question,
-  ].join("\n");
-}
-
-// ── Action handlers ───────────────────────────────────────────────────────────
-
-async function handleStats(supaUrl, supaKey) {
-  const res = await fetch(
-    supaUrl + "/rest/v1/document_chunks"
-      + "?select=doc_type&limit=1000",
-    {
-      headers: {
-        "apikey":        supaKey,
-        "Authorization": "Bearer " + supaKey,
-      },
-    }
-  );
-  if (!res.ok) return { eoc:0, dental:0, total:0, ready:false };
-  const rows = await res.json();
-
-  // Count unique documents (not chunks)
-  const eocDocs    = new Set();
-  const dentalDocs = new Set();
-  const allDocs    = new Set();
-
-  // Need doc_name too — re-fetch with doc_name
-  const res2 = await fetch(
-    supaUrl + "/rest/v1/document_chunks"
-      + "?select=doc_name,doc_type&limit=5000",
-    {
-      headers: {
-        "apikey":        supaKey,
-        "Authorization": "Bearer " + supaKey,
-      },
-    }
-  );
-  const chunks = res2.ok ? await res2.json() : [];
-  chunks.forEach(function(c) {
-    allDocs.add(c.doc_name);
-    if (c.doc_type === "eoc")    eocDocs.add(c.doc_name);
-    if (c.doc_type === "dental") dentalDocs.add(c.doc_name);
+// ── Vector similarity search ──────────────────────────────────────────────────
+async function searchChunks(db, embedding, docType, topK) {
+  // Try pgvector RPC function first (fastest)
+  const { data: rpcData, error: rpcErr } = await db.rpc("match_chunks", {
+    query_embedding:  embedding,
+    match_count:      topK,
+    filter_doc_type:  docType === "all" ? null : docType,
   });
 
-  return {
-    total:  allDocs.size,
-    eoc:    eocDocs.size,
-    dental: dentalDocs.size,
-    ready:  allDocs.size > 0,
-  };
+  if (!rpcErr && rpcData && rpcData.length > 0) {
+    console.log("[docs] match_chunks RPC returned:", rpcData.length, "chunks");
+    return rpcData;
+  }
+
+  // Fallback: fetch all chunks and rank by cosine similarity in JS
+  // (used if match_chunks function doesn't exist yet)
+  console.log("[docs] RPC not available, using JS cosine fallback");
+  let q = db.from("document_chunks").select("id,doc_name,doc_type,page_number,section,chunk_text,embedding");
+  if (docType !== "all") q = q.eq("doc_type", docType);
+  const { data: rows, error } = await q.limit(2000);
+  if (error) throw new Error("Chunk fetch failed: " + error.message);
+
+  // Cosine similarity
+  function cosine(a, b) {
+    let dot = 0, na = 0, nb = 0;
+    for (let i = 0; i < a.length; i++) {
+      dot += a[i]*b[i]; na += a[i]*a[i]; nb += b[i]*b[i];
+    }
+    return dot / (Math.sqrt(na) * Math.sqrt(nb) || 1);
+  }
+
+  return rows
+    .filter(r => r.embedding)
+    .map(r => {
+      // embedding stored as "[0.1,0.2,...]" string
+      const vec = typeof r.embedding === "string"
+        ? JSON.parse(r.embedding) : r.embedding;
+      return { ...r, similarity: cosine(embedding, vec) };
+    })
+    .sort((a, b) => b.similarity - a.similarity)
+    .slice(0, topK);
 }
 
-async function handleQuery(question, docType, openaiKey, supaUrl, supaKey) {
-  if (!question || question.trim().length < 3) {
-    throw new Error("Question is too short");
-  }
+// ── GPT-4o answer with citations ──────────────────────────────────────────────
+async function generateAnswer(question, chunks) {
+  const apiKey = process.env.OPENAI_API_KEY;
+  const context = chunks.map((c, i) =>
+    `--- Source ${i+1} ---\n`
+    + `Document: ${c.doc_name}\n`
+    + `Type: ${c.doc_type?.toUpperCase()}\n`
+    + `Page: ${c.page_number || "?"} | Section: ${c.section || "General"}\n\n`
+    + c.chunk_text
+  ).join("\n\n");
 
-  // 1. Embed the question
-  const questionEmbedding = await embed(question, openaiKey);
+  const prompt =
+    "You are a Medicare Advantage plan document analyst for HealthWorksAI.\n"
+    + "Answer the question using ONLY the document excerpts below.\n"
+    + "Rules:\n"
+    + "- Cite the document name, page, and section for every claim.\n"
+    + "- Flag exclusions, limitations, prior auth requirements explicitly.\n"
+    + "- If the answer is not in the excerpts, say so clearly — do not guess.\n"
+    + "- Be concise. Use bullet points for lists.\n\n"
+    + "DOCUMENT EXCERPTS:\n" + context
+    + "\n\nQUESTION: " + question;
 
-  // 2. Retrieve relevant chunks
-  const chunks = await searchChunks(
-    questionEmbedding, docType, supaUrl, supaKey
-  );
-
-  if (!chunks || chunks.length === 0) {
-    return {
-      answer: "No relevant document passages found for your question. "
-        + "This may mean the documents have not been loaded yet, "
-        + "or the topic is not covered in the available EOC/Dental files.",
-      sources: [],
-      doc_count: 0,
-    };
-  }
-
-  // 3. Build prompt and call GPT-4o
-  const systemPrompt = buildPrompt(question, chunks);
-  const chatRes = await fetch("https://api.openai.com/v1/chat/completions", {
+  const res = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
     headers: {
       "Content-Type":  "application/json",
-      "Authorization": "Bearer " + openaiKey,
+      "Authorization": "Bearer " + apiKey,
     },
     body: JSON.stringify({
-      model:      CHAT_MODEL,
+      model:      "gpt-4o",
       max_tokens: 1500,
-      messages: [
-        { role: "user", content: systemPrompt },
-      ],
+      messages:   [{ role: "user", content: prompt }],
     }),
   });
+  const d = await res.json();
+  if (!res.ok) throw new Error("GPT-4o failed: " + (d.error?.message || res.status));
+  return d.choices[0].message.content.trim();
+}
 
-  if (!chatRes.ok) {
-    const e = await chatRes.json();
-    throw new Error("GPT-4o error: " + (e.error?.message || chatRes.status));
-  }
+// ── Stats handler ─────────────────────────────────────────────────────────────
+async function handleStats(db) {
+  // Use count with grouping via RPC to avoid row limit
+  const { data, error } = await db
+    .from("document_chunks")
+    .select("doc_name, doc_type", { count: "exact" })
+    .limit(5000);
 
-  const chatData = await chatRes.json();
-  const answer   = chatData.choices[0].message.content.trim();
+  if (error) return { total: 0, eoc: 0, dental: 0, ready: false };
 
-  // 4. Format sources for UI citation chips
-  const sources = chunks.map(function(c) {
-    return {
-      doc_name:   c.doc_name,
-      doc_type:   c.doc_type,
-      plan_name:  c.plan_name  || null,
-      parent_org: c.parent_org || null,
-      page:       c.page_number,
-      section:    c.section || "General",
-      similarity: parseFloat((c.similarity * 100).toFixed(1)) + "%",
-      chunk_text: c.chunk_text.length > MAX_CHUNK
-        ? c.chunk_text.slice(0, MAX_CHUNK) + "..."
-        : c.chunk_text,
-    };
+  const byDoc = {};
+  (data || []).forEach(r => {
+    if (!byDoc[r.doc_name]) byDoc[r.doc_name] = r.doc_type;
   });
 
-  return { answer, sources, doc_count: chunks.length };
+  const docs   = Object.entries(byDoc);
+  const eocDocs    = docs.filter(([,t]) => t === "eoc").length;
+  const dentalDocs = docs.filter(([,t]) => t === "dental").length;
+
+  return {
+    total:   docs.length,
+    eoc:     eocDocs,
+    dental:  dentalDocs,
+    ready:   docs.length > 0,
+    documents: docs.map(([name, type]) => ({ name, type })),
+  };
 }
 
 // ── Main handler ──────────────────────────────────────────────────────────────
@@ -234,29 +152,62 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: "Method not allowed" });
 
   const { action, question, doc_type = "all" } = req.body || {};
-  if (!action) return res.status(400).json({ error: "action required" });
+
+  const db = getDB();
+  if (!db) return res.status(500).json({ error: "Supabase not configured" });
 
   try {
-    const { openaiKey, supaUrl, supaKey } = getEnv();
-
+    // ── Stats ────────────────────────────────────────────────────────────────
     if (action === "stats") {
-      const stats = await handleStats(supaUrl, supaKey);
+      const stats = await handleStats(db);
       return res.status(200).json(stats);
     }
 
+    // ── Query ─────────────────────────────────────────────────────────────────
     if (action === "query") {
-      if (!question)
-        return res.status(400).json({ error: "question required" });
-      const result = await handleQuery(
-        question, doc_type, openaiKey, supaUrl, supaKey
-      );
-      return res.status(200).json(result);
+      if (!question || question.trim().length < 3) {
+        return res.status(400).json({ error: "Question too short" });
+      }
+
+      console.log("[docs] question:", question, "| doc_type:", doc_type);
+
+      // 1. Embed question
+      const embedding = await embed(question);
+
+      // 2. Find relevant chunks
+      const chunks = await searchChunks(db, embedding, doc_type, 5);
+
+      if (!chunks || chunks.length === 0) {
+        return res.status(200).json({
+          answer: "No relevant passages found in the loaded documents for your question. "
+            + "Try rephrasing or check that the relevant PDFs have been ingested.",
+          sources: [],
+        });
+      }
+
+      // 3. Generate answer
+      const answer = await generateAnswer(question, chunks);
+
+      // 4. Format sources for UI chips
+      const sources = chunks.map(c => ({
+        doc_name:   c.doc_name,
+        doc_type:   c.doc_type,
+        page:       c.page_number,
+        section:    c.section || "General",
+        similarity: c.similarity
+          ? (c.similarity * 100).toFixed(0) + "%" : null,
+        chunk_text: c.chunk_text
+          ? c.chunk_text.slice(0, 300) + (c.chunk_text.length > 300 ? "..." : "")
+          : "",
+      }));
+
+      return res.status(200).json({ answer, sources });
     }
 
-    return res.status(400).json({ error: "unknown action: " + action });
+    return res.status(400).json({ error: "Invalid action. Use: stats | query" });
 
   } catch (err) {
-    console.error("[docs/" + action + "]", err.message);
+    console.error("[docs]", err.message);
     return res.status(500).json({ error: err.message });
   }
 }

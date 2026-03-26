@@ -93,14 +93,232 @@ const NAV = [
   },
 ];
 
-const TOOLS = [
-  {id:"queries",    label:"GenieAI",                 icon:"✨", color:"#4F46E5"},
-  {id:"reporting",  label:"Custom Reports",          icon:"📑", color:"#0891B2"},
-  {id:"downloads",  label:"Data Downloads",          icon:"⬇️", color:"#059669"},
-  {id:"news",       label:"MA Industry News",        icon:"📰", color:"#D97706"},
-  {id:"quiz",       label:"MA Knowledge Quiz",       icon:"🧠", color:"#7C3AED"},
-  {id:"docplayground", label:"EOC & Dental Playground", icon:"📚", color:"#0F766E"},
+// ── 365 HWAI MA Calendar ──────────────────────────────────────────────────────
+const CALENDAR_EVENTS = [
+  // ── JANUARY ──
+  { month:1, day:1,  type:"cms",   label:"New Plan Year Begins",         detail:"PY coverage effective. OEP opens (Jan 1–Mar 31)." },
+  { month:1, day:1,  type:"hwai",  label:"HWAI: Major Dashboard Refresh",detail:"Competitor Analysis, Market Snapshot & Enrollment Trends — major refresh with new plan year data." },
+  { month:1, day:15, type:"cms",   label:"Monthly Enrollment Release",   detail:"CMS releases monthly MA enrollment figures." },
+  { month:1, day:15, type:"hwai",  label:"HWAI: Enrollment Refresh",     detail:"HWAI_Enrollment table updated. Enrollment Trends dashboard refreshed." },
+
+  // ── FEBRUARY ──
+  { month:2, day:1,  type:"cms",   label:"Advance Notice Released",      detail:"CMS proposes CY payment rates, risk model updates & Star Rating methodology changes." },
+
+  // ── MARCH ──
+  { month:3, day:31, type:"cms",   label:"OEP Closes",                   detail:"Medicare Advantage Open Enrollment Period ends." },
+  { month:3, day:15, type:"cms",   label:"Monthly Enrollment Release",   detail:"CMS releases monthly MA enrollment figures." },
+  { month:3, day:15, type:"hwai",  label:"HWAI: Enrollment Refresh",     detail:"Monthly enrollment data updated across all dashboards." },
+
+  // ── APRIL ──
+  { month:4, day:7,  type:"cms",   label:"Final Rate Announcement",      detail:"CMS finalizes benchmarks, capitation rates & Part D payment policies for next plan year." },
+  { month:4, day:15, type:"cms",   label:"Monthly Enrollment Release",   detail:"CMS releases monthly MA enrollment figures." },
+  { month:4, day:15, type:"hwai",  label:"HWAI: Enrollment Refresh",     detail:"Monthly enrollment data updated. Benchmark data ingested after Rate Announcement." },
+
+  // ── MAY ──
+  { month:5, day:15, type:"cms",   label:"Monthly Enrollment Release",   detail:"CMS releases monthly MA enrollment figures." },
+  { month:5, day:15, type:"hwai",  label:"HWAI: Enrollment Refresh",     detail:"Monthly enrollment data updated." },
+
+  // ── JUNE ──
+  { month:6, day:2,  type:"cms",   label:"Bid Submission Deadline",      detail:"MA plans submit bids to CMS. Final plan filings due." },
+  { month:6, day:15, type:"cms",   label:"OOPC/Bid Review Model Released",detail:"CMS releases the Out-of-Pocket Cost model for bid review." },
+  { month:6, day:15, type:"cms",   label:"Monthly Enrollment Release",   detail:"CMS releases monthly MA enrollment figures." },
+  { month:6, day:15, type:"hwai",  label:"HWAI: Enrollment Refresh",     detail:"Monthly enrollment data updated." },
+
+  // ── JULY ──
+  { month:7, day:15, type:"cms",   label:"Monthly Enrollment Release",   detail:"CMS releases monthly MA enrollment figures." },
+  { month:7, day:15, type:"hwai",  label:"HWAI: Enrollment Refresh",     detail:"Monthly enrollment data updated." },
+
+  // ── AUGUST ──
+  { month:8, day:15, type:"cms",   label:"Monthly Enrollment Release",   detail:"CMS releases monthly MA enrollment figures." },
+  { month:8, day:15, type:"hwai",  label:"HWAI: Enrollment Refresh",     detail:"Monthly enrollment data updated." },
+
+  // ── SEPTEMBER ──
+  { month:9, day:15, type:"cms",   label:"Monthly Enrollment Release",   detail:"CMS releases monthly MA enrollment figures." },
+  { month:9, day:30, type:"cms",   label:"ANOC/EOC Due to Members",      detail:"Plans must send Annual Notice of Change & Evidence of Coverage to enrollees." },
+  { month:9, day:15, type:"hwai",  label:"HWAI: TPV Major Refresh",      detail:"TPV benefit & model refresh. TPV_YoY dashboard updated with new benefit values. Monthly enrollment refreshed." },
+
+  // ── OCTOBER ──
+  { month:10, day:1, type:"cms",   label:"Plan Marketing Opens",         detail:"MA plans can begin marketing 2026 plans to beneficiaries." },
+  { month:10, day:1, type:"cms",   label:"Baseline Model Released",      detail:"CMS releases the MA payment baseline model for the upcoming plan year." },
+  { month:10, day:1, type:"cms",   label:"Star Ratings Released",        detail:"CMS publishes official Star Ratings for all MA contracts." },
+  { month:10, day:1, type:"hwai",  label:"HWAI: Stars Major Refresh",    detail:"Stars dashboard major refresh with new CMS Star Ratings data." },
+  { month:10, day:1, type:"cms",   label:"Landscape File Released",      detail:"CMS releases the MA Landscape file with all plan bids, premiums & benefits." },
+  { month:10, day:1, type:"hwai",  label:"HWAI: Plan Comparison Refresh",detail:"Plan Comparison major benefit refresh with new landscape data. Stars_Landscape table updated." },
+  { month:10, day:15,type:"cms",   label:"AEP Opens",                    detail:"Annual Enrollment Period begins. Beneficiaries can switch MA plans through Dec 7." },
+  { month:10, day:15,type:"cms",   label:"Monthly Enrollment Release",   detail:"CMS releases monthly MA enrollment figures." },
+  { month:10, day:15,type:"hwai",  label:"HWAI: Enrollment Refresh",     detail:"Monthly enrollment data updated." },
+
+  // ── NOVEMBER ──
+  { month:11, day:15,type:"cms",   label:"Monthly Enrollment Release",   detail:"CMS releases monthly MA enrollment figures." },
+  { month:11, day:15,type:"hwai",  label:"HWAI: Enrollment Refresh",     detail:"Monthly enrollment data updated." },
+
+  // ── DECEMBER ──
+  { month:12, day:7, type:"cms",   label:"AEP Closes",                   detail:"Annual Enrollment Period ends. All plan selections finalized for January 1 effectivity." },
+  { month:12, day:8, type:"cms",   label:"5-Star SEP Opens",             detail:"Special Enrollment Period for 5-star plans opens (Dec 8 – Nov 30)." },
+  { month:12, day:15,type:"cms",   label:"Monthly Enrollment Release",   detail:"CMS releases monthly MA enrollment figures." },
+  { month:12, day:15,type:"hwai",  label:"HWAI: Enrollment Refresh",     detail:"Monthly enrollment data updated." },
 ];
+
+const MONTH_NAMES = ["Jan","Feb","Mar","Apr","May","Jun",
+                     "Jul","Aug","Sep","Oct","Nov","Dec"];
+
+function HWAICalendar() {
+  const now        = new Date();
+  const [selMonth, setSelMonth] = useState(now.getMonth() + 1);
+  const [selEvt,   setSelEvt]   = useState(null);
+
+  const monthEvents = CALENDAR_EVENTS.filter(e => e.month === selMonth)
+    .sort((a,b) => a.day - b.day);
+
+  // Find next upcoming event overall
+  const today = now.getMonth()*100 + now.getDate();
+  const upcoming = CALENDAR_EVENTS
+    .filter(e => e.month*100 + e.day >= today)
+    .sort((a,b) => (a.month*100+a.day) - (b.month*100+b.day))[0];
+
+  return (
+    <div style={{padding:"0 10px 12px"}}>
+      <div style={{color:"#38BDF8",fontSize:8.5,fontWeight:700,
+        textTransform:"uppercase",letterSpacing:".1em",
+        marginBottom:7,padding:"0 2px",
+        display:"flex",alignItems:"center",gap:5}}>
+        <span style={{fontSize:10}}>📅</span>
+        365 HWAI MA Calendar
+      </div>
+
+      {/* Month selector */}
+      <div style={{display:"flex",flexWrap:"wrap",gap:2,marginBottom:8}}>
+        {MONTH_NAMES.map(function(m,i){
+          const mn   = i + 1;
+          const isS  = selMonth === mn;
+          const hasH = CALENDAR_EVENTS.some(e=>e.month===mn&&e.type==="hwai");
+          return (
+            <button key={m} onClick={function(){setSelMonth(mn);setSelEvt(null);}}
+              style={{
+                flex:"0 0 calc(25% - 2px)",
+                padding:"3px 0",borderRadius:4,border:"none",
+                cursor:"pointer",fontFamily:"inherit",
+                fontSize:9,fontWeight:isS?700:400,
+                background:isS?"#38BDF8":"#1E293B",
+                color:isS?"#0F172A":"#64748B",
+                position:"relative",
+              }}>
+              {m}
+              {hasH && !isS && (
+                <span style={{
+                  position:"absolute",top:1,right:2,
+                  width:3,height:3,borderRadius:"50%",
+                  background:"#0F766E",
+                }}/>
+              )}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Next upcoming banner */}
+      {upcoming && selMonth === now.getMonth()+1 && (
+        <div style={{
+          background:"#1E293B",borderRadius:6,padding:"5px 7px",
+          marginBottom:7,borderLeft:"2px solid #F59E0B",
+        }}>
+          <div style={{fontSize:8.5,color:"#F59E0B",fontWeight:700,marginBottom:1}}>
+            NEXT UP
+          </div>
+          <div style={{fontSize:10,color:"#E2E8F0",fontWeight:600}}>
+            {MONTH_NAMES[upcoming.month-1]} {upcoming.day} — {upcoming.label}
+          </div>
+        </div>
+      )}
+
+      {/* Events for selected month */}
+      <div style={{display:"flex",flexDirection:"column",gap:3}}>
+        {monthEvents.length === 0 && (
+          <div style={{fontSize:10,color:"#334155",textAlign:"center",padding:"8px 0"}}>
+            No events this month
+          </div>
+        )}
+        {monthEvents.map(function(e,i){
+          const isCMS  = e.type==="cms";
+          const isHWAI = e.type==="hwai";
+          const isSel  = selEvt===i;
+          return (
+            <div key={i}>
+              <button
+                onClick={function(){setSelEvt(isSel?null:i);}}
+                style={{
+                  width:"100%",textAlign:"left",
+                  background:isSel?(isCMS?"#172554":"#042f2e"):"#1E293B",
+                  border:"1px solid "+(isSel?(isCMS?"#1D4ED8":"#0F766E"):"#334155"),
+                  borderLeft:"2px solid "+(isCMS?"#3B82F6":"#0D9488"),
+                  borderRadius:5,padding:"4px 6px",
+                  cursor:"pointer",fontFamily:"inherit",
+                }}>
+                <div style={{display:"flex",alignItems:"center",gap:5}}>
+                  <span style={{
+                    fontSize:8,fontWeight:700,
+                    background:isCMS?"#1D4ED8":"#0F766E",
+                    color:"#fff",padding:"1px 4px",borderRadius:3,
+                    flexShrink:0,
+                  }}>
+                    {isCMS?"CMS":"HWAI"}
+                  </span>
+                  <span style={{fontSize:9,color:"#94A3B8",flexShrink:0}}>
+                    {MONTH_NAMES[e.month-1]} {e.day}
+                  </span>
+                  <span style={{fontSize:9.5,color:"#E2E8F0",fontWeight:500,
+                    lineHeight:1.3,flex:1}}>
+                    {e.label}
+                  </span>
+                </div>
+              </button>
+              {isSel && (
+                <div style={{
+                  background:"#0F172A",border:"1px solid #1E293B",
+                  borderTop:"none",borderRadius:"0 0 5px 5px",
+                  padding:"5px 7px",fontSize:9.5,color:"#94A3B8",
+                  lineHeight:1.5,
+                }}>
+                  {e.detail}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Legend */}
+      <div style={{display:"flex",gap:8,marginTop:8,padding:"0 2px"}}>
+        <div style={{display:"flex",alignItems:"center",gap:3}}>
+          <div style={{width:8,height:8,borderRadius:1,background:"#1D4ED8"}}/>
+          <span style={{fontSize:8.5,color:"#475569"}}>CMS Event</span>
+        </div>
+        <div style={{display:"flex",alignItems:"center",gap:3}}>
+          <div style={{width:8,height:8,borderRadius:1,background:"#0D9488"}}/>
+          <span style={{fontSize:8.5,color:"#475569"}}>HWAI Refresh</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// AI Tools group
+const AI_TOOLS = [
+  {id:"queries",       label:"GenieAI",               icon:"✨", color:"#4F46E5"},
+  {id:"reporting",     label:"Custom Reports",        icon:"📑", color:"#0891B2"},
+  {id:"downloads",     label:"Data Downloads",        icon:"⬇️", color:"#059669"},
+  {id:"docplayground", label:"EOC & Dental Playground",icon:"📚", color:"#0F766E"},
+];
+
+// MA Learning Hub group
+const LEARN_TOOLS = [
+  {id:"news",     label:"MA Industry News",   icon:"📰", color:"#D97706"},
+  {id:"quiz",     label:"MA Knowledge Quiz",  icon:"🧠", color:"#7C3AED"},
+  {id:"calendar", label:"365 HWAI Calendar",  icon:"📅", color:"#38BDF8"},
+];
+
+// Combined for routing (order preserved)
+const TOOLS = [...AI_TOOLS, ...LEARN_TOOLS];
 
 const LD = {
   nat:{tp:15955,zp:"72.5%",snp:"42.9%",ap:12.21,as_:3.81,fp:"44.6%"},
@@ -120,19 +338,27 @@ const TM = {
 const ATOOLS = [
   {
     name: "query_landscape_data",
-    description: "Query Stars_Landscape table for MA plan data — "
-      + "bid IDs, plan names, star ratings, benchmarks, crosswalk status. "
-      + "IMPORTANT: pass state as full name OR abbreviation e.g. 'Florida' or 'FL'. "
-      + "Filter by State, County, parent_organization, Star_Rating.",
+    description:
+      "Query Stars_Landscape table for Medicare Advantage plan data. "
+      + "UNIQUE PLAN IDENTIFIER = Bid_id (format: CONTRACT_ID_PLAN_ID_SEGMENT, e.g. H0504_041_0). "
+      + "The table has ONE ROW PER PLAN-COUNTY — same Bid_id appears multiple times. "
+      + "The tool returns unique_plan_count (deduplicated by Bid_id) — always use this for plan counts. "
+      + "State stored as full name: 'Florida' not 'FL' (system normalises automatically). "
+      + "Use for: plan counts, star ratings, benchmark rates, payor market share, crosswalk status.",
     input_schema: {
       type: "object",
       properties: {
-        state:      {type:"string", description:"State name e.g. 'Florida' or abbreviation 'FL'"},
-        states:     {type:"array",  items:{type:"string"}, description:"Multiple states e.g. ['Florida','Texas']"},
-        county:     {type:"string", description:"County name (partial match)"},
-        parent_org: {type:"string", description:"Payor/org name (partial match)"},
+        state:      {type:"string",
+          description:"State full name OR abbreviation — 'Florida' or 'FL', 'Texas' or 'TX'"},
+        states:     {type:"array", items:{type:"string"},
+          description:"Multiple states e.g. ['Florida','Texas']"},
+        county:     {type:"string", description:"County name partial match e.g. 'Miami-Dade'"},
+        parent_org: {type:"string",
+          description:"Payor/org name partial match e.g. 'Humana', 'UnitedHealth'"},
         min_stars:  {type:"number", description:"Minimum star rating e.g. 4"},
-        limit:      {type:"number", description:"Max rows to return"},
+        bid_id:     {type:"string",
+          description:"Specific plan Bid_id e.g. H0504_041_0 — use for single plan lookup"},
+        limit:      {type:"number", description:"Max plans to return (default 50)"},
       },
     },
   },
@@ -172,15 +398,18 @@ const ATOOLS = [
   },
   {
     name: "query_formulary_data",
-    description: "Query PartD_MRx table for Part D formulary data — "
-      + "drug tiers, benefit values, tier types per bid_id.",
+    description:
+      "Query PartD_MRx table for Part D formulary data — drug tiers and benefit values. "
+      + "LINKED TO PLANS via bid_id (the unique MA plan identifier). "
+      + "To look up a specific plan's formulary, pass its Bid_id (e.g. H0504_041_0). "
+      + "Use for: drug tier placement, benefit value by tier, formulary comparison across plans.",
     input_schema: {
       type: "object",
       properties: {
-        bid_id:    {type:"string", description:"Plan bid ID"},
-        tier:      {type:"string", description:"Tier number as string"},
-        tier_type: {type:"string", description:"Tier type partial match"},
-        benefit:   {type:"string", description:"Benefit name partial match"},
+        bid_id:  {type:"string",
+          description:"Plan Bid_id e.g. H0504_041_0 — unique plan identifier"},
+        tier:    {type:"string", description:"Tier number e.g. '1', '2', '3'"},
+        benefit: {type:"string", description:"Benefit name partial match"},
       },
     },
   },
@@ -200,10 +429,12 @@ const ATOOLS = [
   },
   {
     name: "query_tpv_data",
-    description: "Query TPV_Crosswalk table for Total Plan Value (TPV) "
-      + "year-over-year comparisons 2024/2025/2026. Includes Part C, Part D, "
-      + "supplemental benefits (DVH, OTC, Inpatient, Transport, SSBCI), "
-      + "crosswalk status, and enrollment.",
+    description:
+      "Query TPV_Crosswalk table for Total Plan Value (TPV) year-over-year 2024/2025/2026. "
+      + "Linked to plans via bid_id (unique MA plan identifier = CONTRACT_ID_PLAN_ID_SEGMENT). "
+      + "Includes: Part C TPV, Part D TPV, supplemental benefits (DVH, OTC, Inpatient, Transport, SSBCI), "
+      + "crosswalk status, and enrollment counts. "
+      + "Use for: YoY TPV comparison, benefit richness analysis, plan continuity/crosswalk status.",
     input_schema: {
       type: "object",
       properties: {
@@ -213,8 +444,40 @@ const ATOOLS = [
         parent_org:       {type:"string"},
         plan_type:        {type:"string"},
         snp_type:         {type:"string"},
-        crosswalk_status: {type:"string",
-          description:"e.g. Active, Terminated, New"},
+        crosswalk_status: {type:"string"},
+      },
+    },
+  },
+  {
+    name: "query_plan_comparison",
+    description: "Query the plans table for plan comparison data. "
+      + "Use for questions like: compare plans side by side, find plans by payor, "
+      + "show plan benefits, filter by state or plan type. "
+      + "ALWAYS call this tool for any plan comparison question.",
+    input_schema: {
+      type: "object",
+      properties: {
+        state:      {type:"string", description:"State abbreviation e.g. FL or full name Florida"},
+        parent_org: {type:"string", description:"Payor/org name e.g. Humana, UnitedHealth"},
+        plan_type:  {type:"string", description:"Plan type e.g. HMO, PPO"},
+        bid_id:     {type:"string", description:"Specific plan bid ID"},
+        limit:      {type:"number", description:"Max rows, default 50"},
+      },
+    },
+  },
+  {
+    name: "query_dental_comparison",
+    description: "Query the PC_Dental table for dental plan comparison data. "
+      + "Use for questions about dental benefits, dental coverage limits, "
+      + "dental plan comparisons across payors or states. "
+      + "ALWAYS call this tool for dental benefit questions.",
+    input_schema: {
+      type: "object",
+      properties: {
+        state:      {type:"string"},
+        parent_org: {type:"string"},
+        bid_id:     {type:"string"},
+        limit:      {type:"number"},
       },
     },
   },
@@ -577,32 +840,121 @@ const QPILLS=[
 ];
 
 function QueriesPanel({payor}) {
+  // Poll /api/context every 3s for external filter context (from Plan Comparison etc.)
+  const [extCtx, setExtCtx] = useState(null);
+  const extCtxRef = useRef(null);
+  const lastCtxId = useRef(null);
+
+  useEffect(function(){
+    const isArtifact = typeof window !== "undefined"
+      && window.location.hostname.endsWith("claude.ai");
+    if (isArtifact) return;
+
+    const sid = "mipi_" + (payor.id || "user");
+    const poll = setInterval(async function(){
+      try {
+        const r = await fetch("/api/context?session_id=" + sid);
+        const d = await r.json();
+        if (d.has_context && d.context && d.context.context_id !== lastCtxId.current) {
+          lastCtxId.current = d.context.context_id;
+          setExtCtx(d.context);
+          // Auto-send the prompt to GenieAI
+          if (extCtxRef.current && d.context.prompt) {
+            setTimeout(function(){
+              extCtxRef.current(d.context.prompt);
+            }, 500);
+          }
+        }
+      } catch(_) {}
+    }, 3000);
+    return function(){ clearInterval(poll); };
+  }, [payor]);
+
   const sys="You are GenieAI — HealthWorksAI Medicare Advantage intelligence assistant. "
     +"User is a payor professional from "+payor.label+". "
     +"\n\n"
-    +"CRITICAL INSTRUCTIONS:\n"
-    +"1. You MUST call a tool for EVERY question about plans, enrollment, stars, TPV, or drugs. "
-    +"NEVER answer from your training knowledge — always query the live database.\n"
-    +"2. Available tools and their Supabase tables:\n"
-    +"   - query_landscape_data → Stars_Landscape table (plan counts, star ratings, benchmarks)\n"
-    +"   - query_enrollment_data → HWAI_Enrollment table (member counts, market share)\n"
-    +"   - query_stars_data → Stars_Cutpoint table (CMS star rating cutpoints)\n"
-    +"   - query_formulary_data → PartD_MRx table (drug tiers, benefits)\n"
-    +"   - query_drug_rankings → PartD_Ranking table (top drugs by spend/claims)\n"
-    +"   - query_tpv_data → TPV_Crosswalk table (Total Plan Value YoY)\n"
-    +"3. For plan count questions (e.g. 'how many plans in FL') → call query_landscape_data "
-    +"with state='FL'.\n"
-    +"4. After receiving tool results, report the EXACT numbers from the database. "
-    +"Do not say data is unavailable if the tool returned results.\n"
-    +"5. Always cite the source table name in your answer.\n\n"
+
+    +"## MEDICARE ADVANTAGE DOMAIN KNOWLEDGE\n"
+    +"A Medicare Advantage plan is uniquely identified by its BID_ID (also written Bid_id). "
+    +"The Bid_id format is: CONTRACT_ID + underscore + PLAN_ID + underscore + SEGMENT_ID "
+    +"(e.g. H0504_041_0 means contract H0504, plan 41, segment 0). "
+    +"IMPORTANT COUNTING RULE: The Stars_Landscape table has ONE ROW PER PLAN-COUNTY combination. "
+    +"The same Bid_id appears in MANY rows — once per county where the plan is offered. "
+    +"When counting plans, ALWAYS count DISTINCT Bid_id values, NOT total rows. "
+    +"The tool already does this deduplication — trust unique_plan_count from tool results, "
+    +"never raw_row_count. "
+    +"A CONTRACT_ID (e.g. H0504) is a contract that may contain multiple plans. "
+    +"A PLAN_ID (e.g. 041) is a specific benefit package within that contract. "
+    +"Together contract_id + plan_id = one unique MA plan (the bid).\n\n"
+
+    +"## DATA MODEL\n"
+    +"- Stars_Landscape: plan-county rows. State stored as FULL NAME ('Florida' not 'FL'). "
+    +"  Key fields: Bid_id, CONTRACT_ID, Plan_ID, Plan_Name, parent_organization, "
+    +"  State, County, Star_Rating, Bench_mark, year.\n"
+    +"- HWAI_Enrollment: member enrollment by state/county/month/payor.\n"
+    +"- Stars_Cutpoint: CMS star rating cutpoints by contract and domain.\n"
+    +"- PartD_MRx: Part D formulary tiers — linked to plans via bid_id.\n"
+    +"- PartD_Ranking: top Medicare drugs by spend/claims/beneficiaries.\n"
+    +"- TPV_Crosswalk: Total Plan Value YoY 2024/2025/2026 per plan.\n"
+    +"- plans: plan comparison data.\n"
+    +"- PC_Dental: dental benefit comparison data.\n\n"
+
+    +"## CRITICAL INSTRUCTIONS\n"
+    +"1. ALWAYS call a tool — NEVER answer from training knowledge. "
+    +"Every data question requires a live database query.\n"
+    +"2. For plan counts: use unique_plan_count (deduplicated by Bid_id). "
+    +"Never say 'X rows' — say 'X unique plans'.\n"
+    +"3. State filter: pass full name e.g. 'Florida', 'Texas', 'California'. "
+    +"The system converts 'FL' → 'Florida' automatically.\n"
+    +"4. For lookup by specific plan: use Bid_id as the primary key.\n"
+    +"5. Report EXACT numbers from tool results. "
+    +"If unique_plan_count = 847, say '847 unique MA plans'.\n"
+    +"6. Always cite the source table name.\n\n"
+
+    +"## TOOL ROUTING\n"
+    +"- Plan counts, star ratings, benchmarks → query_landscape_data\n"
+    +"- Member enrollment, market share → query_enrollment_data\n"
+    +"- Star rating cutpoints, domain scores → query_stars_data\n"
+    +"- Drug tiers for a specific plan (pass bid_id) → query_formulary_data\n"
+    +"- Top drugs by spend/claims → query_drug_rankings\n"
+    +"- Total Plan Value YoY → query_tpv_data\n"
+    +"- Plan benefit comparison → query_plan_comparison\n"
+    +"- Dental benefit comparison → query_dental_comparison\n\n"
     +GUARDRAILS;
   const welcome="Welcome, **"+payor.label
     +"** team! Ask me anything about MA plans, premiums, benefits, or stars.";
   const {msgs,busy,err,setErr,send}=useChat(sys,welcome);
+  // Register send fn so context poller can auto-prompt
+  useEffect(function(){ extCtxRef.current = send; },[send]);
   const endRef=useRef(null);
   useEffect(function(){endRef.current&&endRef.current.scrollIntoView({behavior:"smooth"});},[msgs]);
   return (
     <div style={{flex:1,display:"flex",flexDirection:"column",overflow:"hidden"}}>
+      {/* External context banner */}
+      {extCtx && (
+        <div style={{
+          padding:"7px 16px",background:"#F0FDFA",
+          borderBottom:"1px solid #99F6E4",
+          display:"flex",alignItems:"center",gap:8,flexShrink:0,
+        }}>
+          <span style={{fontSize:13}}>📡</span>
+          <div style={{flex:1,fontSize:11,color:"#0F766E"}}>
+            <strong>External context received</strong>
+            {extCtx.filters && extCtx.filters.state &&
+              <span> · State: {extCtx.filters.state}</span>}
+            {extCtx.filters && extCtx.filters.payor &&
+              <span> · Payor: {extCtx.filters.payor}</span>}
+            {extCtx.filters && extCtx.filters.plan_type &&
+              <span> · Type: {extCtx.filters.plan_type}</span>}
+            <span style={{color:"#94A3B8",marginLeft:6}}>
+              from {extCtx.source} · {new Date(extCtx.timestamp).toLocaleTimeString()}
+            </span>
+          </div>
+          <button onClick={function(){setExtCtx(null);}}
+            style={{background:"none",border:"none",cursor:"pointer",
+              color:"#0F766E",fontSize:13,padding:0}}>×</button>
+        </div>
+      )}
       <div style={{flex:1,overflowY:"auto",padding:"14px 18px",
         display:"flex",flexDirection:"column",gap:10}}>
         {msgs.map(function(m){return <Bubble key={m.id} msg={m} accent="#4F46E5"/>;}) }
@@ -653,9 +1005,14 @@ function ReportingPanel({payor}) {
   const [mkt,setMkt]=useState("Florida");
   const [sel,setSel]=useState(null);
   const sys="You are MIPI POWER HOUSE - HealthWorksAI MA intelligence for "
-    +payor.label+". Generate well-structured markdown reports with sections, data tables, "
-    +"key findings, and strategic recommendations. Use PY2026 CMS data for CA, FL, TX. "
-    +"Call tools to fetch data. Always cite sources.\n\n"
+    +payor.label+". Generate well-structured markdown reports. "
+    +"KEY DOMAIN RULE: A Medicare Advantage plan is uniquely identified by its Bid_id "
+    +"(format CONTRACT_ID_PLAN_ID_SEGMENT e.g. H0504_041_0). "
+    +"Stars_Landscape has one row per plan-county — always count DISTINCT Bid_id for plan counts. "
+    +"States stored as full names in DB ('Florida' not 'FL'). "
+    +"Call tools to fetch all data — never use training knowledge for counts or statistics. "
+    +"Generate reports with: executive summary, data tables, key findings, strategic recommendations. "
+    +"Always cite the source table name.\n\n"
     +GUARDRAILS;
   const welcome="Ready to build reports for **"+payor.label
     +"**. Select a template or describe your report below.";
@@ -1346,7 +1703,7 @@ function QuizPanel() {
   );
 }
 
-function Copilot({payor, db}) {
+function Copilot({payor, db, planCtx, sendRef}) {
   const [minimized, setMinimized] = useState(false);
   const [inp, setInp] = useState("");
   const endRef = useRef(null);
@@ -1359,6 +1716,13 @@ function Copilot({payor, db}) {
   const welcome = "I am your **HWAI Copilot** for **"+db.label
     +"**.\n\n"+db.desc+"\n\nPick a question below or ask your own.";
   const {msgs, busy, err, setErr, send} = useChat(sys, welcome);
+
+  // Register send fn with parent so postMessage bridge can auto-prompt
+  useEffect(function(){
+    if (sendRef) sendRef.current = send;
+    return function(){ if (sendRef) sendRef.current = null; };
+  }, [send, sendRef]);
+
   useEffect(function(){
     endRef.current && endRef.current.scrollIntoView({behavior:"smooth"});
   }, [msgs]);
@@ -1402,7 +1766,7 @@ function Copilot({payor, db}) {
   return (
     <div style={{
       position:"absolute", bottom:20, right:20,
-      width:320, maxHeight:"72%",
+      width:320, maxHeight:"88%",
       background:"#fff",
       borderRadius:14,
       border:"1px solid #E2E8F0",
@@ -1457,6 +1821,44 @@ function Copilot({payor, db}) {
           </button>
         </div>
       </div>
+
+      {/* Plan context banner — shown when iframe sends an event */}
+      {planCtx && (
+        <div style={{
+          padding:"7px 12px",
+          background:db.catColor+"15",
+          borderBottom:"1px solid "+db.catColor+"30",
+          flexShrink:0,
+          display:"flex", alignItems:"center", gap:7,
+        }}>
+          <span style={{fontSize:13}}>
+            {planCtx.event==="plan_selected"    ? "📋"
+           : planCtx.event==="plans_compared"   ? "⚖️"
+           : planCtx.event==="filter_changed"   ? "🔽"
+           : planCtx.event==="state_changed"    ? "📍" : "📡"}
+          </span>
+          <div style={{flex:1,minWidth:0}}>
+            <div style={{fontSize:10,fontWeight:700,color:db.catColor,
+              textTransform:"uppercase",letterSpacing:".06em",lineHeight:1.2}}>
+              Plan Comparison context
+            </div>
+            <div style={{fontSize:11,color:"#475569",marginTop:1,
+              whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>
+              {planCtx.event==="plan_selected"  && (planCtx.plan_name||planCtx.bid_id||"Plan selected")}
+              {planCtx.event==="plans_compared" && ("Comparing: "+(planCtx.names||""))}
+              {planCtx.event==="filter_changed" && ("Filter: "
+                +[planCtx.state,planCtx.plan_type,planCtx.payor]
+                  .filter(Boolean).join(", "))}
+              {planCtx.event==="state_changed"  && ("State: "+planCtx.state)}
+            </div>
+          </div>
+          <div style={{
+            width:7,height:7,borderRadius:"50%",
+            background:db.catColor,flexShrink:0,
+            animation:"pulse 1.5s ease-in-out infinite",
+          }}/>
+        </div>
+      )}
 
       {/* Messages */}
       <div style={{
@@ -1552,6 +1954,57 @@ function Copilot({payor, db}) {
         background:"#FAFAFA",
         flexShrink:0,
       }}>
+        {/* AI Insights Button */}
+        <button
+          onClick={function(){
+            const prompt =
+              "Generate a concise AI Insights summary for the "
+              + db.label + " dashboard. Include: "
+              + "1) Key market observations from the latest data, "
+              + "2) Top 3 competitive trends worth noting, "
+              + "3) Any anomalies or standout metrics, "
+              + "4) One strategic recommendation. "
+              + "Use query_landscape_data and query_enrollment_data to ground your insights in real data.";
+            send(prompt);
+          }}
+          disabled={busy}
+          style={{
+            width:"100%",
+            display:"flex", alignItems:"center", justifyContent:"center", gap:6,
+            background:busy
+              ? "#E2E8F0"
+              : db.catColor,
+            color:busy?"#94A3B8":"#fff",
+            border:"none", borderRadius:8,
+            padding:"7px 10px",
+            cursor:busy?"not-allowed":"pointer",
+            fontWeight:600, fontSize:12,
+            fontFamily:"inherit",
+            marginBottom:7,
+            boxShadow:busy?"none":"0 2px 8px "+db.catColor+"44",
+            transition:"all .2s",
+          }}
+          onMouseEnter={function(e){
+            if(!busy) e.currentTarget.style.opacity=".9";
+          }}
+          onMouseLeave={function(e){
+            e.currentTarget.style.opacity="1";
+          }}
+        >
+          <span style={{fontSize:13}}>✨</span>
+          {busy ? "Generating insights..." : "AI Insights"}
+          {!busy && (
+            <span style={{
+              fontSize:9, fontWeight:700, letterSpacing:".06em",
+              background:"rgba(255,255,255,.25)",
+              padding:"1px 5px", borderRadius:10,
+            }}>
+              AUTO
+            </span>
+          )}
+        </button>
+
+        {/* Message input */}
         <div style={{
           display:"flex", gap:5, alignItems:"flex-end",
           background:"#fff", borderRadius:9,
@@ -1600,6 +2053,93 @@ function Copilot({payor, db}) {
 function DBView({db, payor}) {
   const [ifrErr,setIfrErr]=useState(false);
   const [loading,setLoading]=useState(true);
+  const [planCtx,setPlanCtx]=useState(null);    // context received from iframe
+  const copilotSendRef=useRef(null);             // ref to Copilot send function
+
+  // ── postMessage bridge — listens for events from Plan Comparison iframe ───
+  useEffect(function(){
+    function onMessage(e) {
+      // Accept messages from any subdomain of analytics-hub.com or same origin
+      const allowed = ["analytics-hub.com","localhost","vercel.app"];
+      const fromAllowed = allowed.some(function(d){
+        return e.origin.includes(d) || e.origin === window.location.origin;
+      });
+      if (!fromAllowed) return;
+
+      const msg = e.data;
+      if (!msg || !msg.type) return;
+
+      // Build a human-readable context string from the event
+      let ctx = null;
+      let autoPrompt = null;
+
+      if (msg.type === "plan_selected") {
+        ctx = {
+          event:     "plan_selected",
+          bid_id:    msg.bid_id    || msg.bidId    || null,
+          plan_name: msg.plan_name || msg.planName || null,
+          payor:     msg.payor     || msg.parent_org|| null,
+          state:     msg.state     || null,
+          plan_type: msg.plan_type || null,
+        };
+        autoPrompt = "The user just selected plan: "
+          + (ctx.plan_name || ctx.bid_id || "unknown")
+          + (ctx.payor     ? " from " + ctx.payor        : "")
+          + (ctx.state     ? " in "   + ctx.state        : "")
+          + ". Give a brief summary of this plan's key features using query_plan_comparison.";
+      }
+
+      if (msg.type === "plans_compared") {
+        const names = (msg.plans || [])
+          .map(function(p){ return p.plan_name || p.bid_id; })
+          .filter(Boolean).join(" vs ");
+        ctx = { event:"plans_compared", plans: msg.plans || [], names };
+        autoPrompt = "The user is comparing these plans: "
+          + names
+          + ". Highlight the key differences in benefits, premiums, and star ratings "
+          + "using query_plan_comparison.";
+      }
+
+      if (msg.type === "filter_changed") {
+        ctx = {
+          event:     "filter_changed",
+          state:     msg.state     || null,
+          plan_type: msg.plan_type || null,
+          payor:     msg.payor     || null,
+          snp_type:  msg.snp_type  || null,
+        };
+        autoPrompt = "The user filtered the Plan Comparison to: "
+          + Object.entries(ctx)
+              .filter(function([k,v]){ return k !== "event" && v; })
+              .map(function([k,v]){ return k+": "+v; })
+              .join(", ")
+          + ". Summarise what plans match these filters using query_plan_comparison.";
+      }
+
+      if (msg.type === "state_changed") {
+        ctx = { event:"state_changed", state: msg.state || null };
+        autoPrompt = "The user changed the state filter to "
+          + (msg.state || "unknown")
+          + ". How many MA plans are available in this state? "
+          + "Use query_landscape_data and query_plan_comparison.";
+      }
+
+      if (ctx) {
+        setPlanCtx(ctx);
+        console.log("[postMessage bridge] received:", ctx);
+        // Auto-send to Copilot if handler is registered
+        if (autoPrompt && copilotSendRef.current) {
+          setTimeout(function(){
+            copilotSendRef.current(autoPrompt);
+          }, 400);
+        }
+      }
+    }
+
+    window.addEventListener("message", onMessage);
+    return function(){ window.removeEventListener("message", onMessage); };
+  }, []);
+
   return (
     <div style={{flex:1,display:"flex",overflow:"hidden",position:"relative"}}>
       <div style={{flex:1,display:"flex",flexDirection:"column",overflow:"hidden"}}>
@@ -1677,7 +2217,8 @@ function DBView({db, payor}) {
           )}
         </div>
       </div>
-      <Copilot key={db.id} payor={payor} db={db}/>
+      <Copilot key={db.id} payor={payor} db={db}
+        planCtx={planCtx} sendRef={copilotSendRef}/>
     </div>
   );
 }
@@ -1758,7 +2299,19 @@ function Sidebar({payor, aDB, aTool, onDB, onTool, onSwitch, coll, onToggle}) {
           );
         })}
         <div style={{borderTop:"1px solid #1E293B",width:"100%",margin:"2px 0"}}/>
-        {TOOLS.map(function(t){
+        {AI_TOOLS.map(function(t){
+          const isA=aTool&&aTool.id===t.id&&!aDB;
+          return (
+            <button key={t.id} title={t.label} onClick={function(){onTool(t);}}
+              style={{width:28,height:28,borderRadius:6,
+                background:isA?t.color:"transparent",border:"none",cursor:"pointer",
+                display:"flex",alignItems:"center",justifyContent:"center",fontSize:13}}>
+              {t.icon}
+            </button>
+          );
+        })}
+        <div style={{borderTop:"1px solid #1E293B",width:"100%",margin:"2px 0",opacity:.4}}/>
+        {LEARN_TOOLS.map(function(t){
           const isA=aTool&&aTool.id===t.id&&!aDB;
           return (
             <button key={t.id} title={t.label} onClick={function(){onTool(t);}}
@@ -1860,11 +2413,16 @@ function Sidebar({payor, aDB, aTool, onDB, onTool, onSwitch, coll, onToggle}) {
           );
         })}
         <div style={{borderTop:"1px solid #1E293B",margin:"6px 0",opacity:.4}}/>
-        <div style={{color:"#475569",fontSize:8.5,fontWeight:600,
-          textTransform:"uppercase",letterSpacing:".1em",marginBottom:5,padding:"0 5px"}}>
-          Tools
+
+        {/* AI Tools group */}
+        <div style={{color:"#4F46E5",fontSize:8.5,fontWeight:700,
+          textTransform:"uppercase",letterSpacing:".1em",
+          marginBottom:5,padding:"0 5px",
+          display:"flex",alignItems:"center",gap:5}}>
+          <span style={{fontSize:9}}>✦</span>
+          AI Tools
         </div>
-        {TOOLS.map(function(t){
+        {AI_TOOLS.map(function(t){
           const isA=aTool&&aTool.id===t.id&&!aDB;
           return (
             <button key={t.id} onClick={function(){onTool(t);}}
@@ -1882,6 +2440,36 @@ function Sidebar({payor, aDB, aTool, onDB, onTool, onSwitch, coll, onToggle}) {
             </button>
           );
         })}
+
+        <div style={{borderTop:"1px solid #1E293B",margin:"6px 0",opacity:.3}}/>
+
+        {/* MA Learning Hub group */}
+        <div style={{color:"#D97706",fontSize:8.5,fontWeight:700,
+          textTransform:"uppercase",letterSpacing:".1em",
+          marginBottom:5,padding:"0 5px",
+          display:"flex",alignItems:"center",gap:5}}>
+          <span style={{fontSize:9}}>◈</span>
+          MA Learning Hub
+        </div>
+        {LEARN_TOOLS.map(function(t){
+          const isA=aTool&&aTool.id===t.id&&!aDB;
+          return (
+            <button key={t.id} onClick={function(){onTool(t);}}
+              style={{display:"flex",alignItems:"center",gap:6,width:"100%",
+                padding:"6px 7px",marginBottom:1,borderRadius:7,border:"none",
+                cursor:"pointer",fontFamily:"inherit",
+                background:isA?t.color+"20":"transparent",
+                borderLeft:isA?"2px solid "+t.color:"2px solid transparent",
+                textAlign:"left",transition:"all .15s"}}>
+              <span style={{fontSize:12}}>{t.icon}</span>
+              <span style={{fontSize:11,fontWeight:isA?700:400,
+                color:isA?t.color:"#94A3B8"}}>{t.label}</span>
+              {isA&&<div style={{marginLeft:"auto",width:4,height:4,
+                borderRadius:"50%",background:t.color,flexShrink:0}}/>}
+            </button>
+          );
+        })}
+
       </div>
       <div style={{padding:"7px 12px",borderTop:"1px solid #1E293B",
         color:"#334155",fontSize:9,flexShrink:0}}>
@@ -1921,41 +2509,43 @@ async function queryDocuments(question, docType) {
   if (isArtifact) {
     await new Promise(function(r){ setTimeout(r, 1100); });
     return {
-      answer: "**HWAI Document Intelligence is ready.**\n\n"
-        + "Once HealthWorksAI uploads EOC and Dental PDFs to Supabase Storage "
-        + "and runs the ingestion script, I will:\n\n"
-        + "- Retrieve the most relevant passages for your question\n"
-        + "- Answer with exact **document name, page, and section** citations\n"
-        + "- Flag exclusions, limitations, and prior auth requirements\n"
-        + "- Compare terms across multiple plans side-by-side\n\n"
-        + "**Your question:** *" + question + "*\n\n"
-        + "_Connect Supabase and run `node scripts/ingest_docs.js` to go live._",
+      answer: "**HWAI Document Intelligence** is live on your deployed app.\n\n"
+        + "19 PDFs have been ingested including EOC and Dental documents.\n\n"
+        + "Open the deployed MIPI POWER HOUSE and ask your question there "
+        + "to get answers cited directly from your plan documents.\n\n"
+        + "**Your question:** *" + question + "*",
       sources: [],
-      doc_count: 0,
       mock: true,
     };
   }
-  const res = await fetch("/api/docs", {
-    method: "POST",
-    headers: {"Content-Type": "application/json"},
-    body: JSON.stringify({action:"query", question, doc_type: docType}),
-  });
-  if (!res.ok) throw new Error("Docs API " + res.status);
-  return res.json();
+  try {
+    const res = await fetch("/api/docs", {
+      method:  "POST",
+      headers: {"Content-Type":"application/json"},
+      body:    JSON.stringify({action:"query", question, doc_type: docType}),
+    });
+    if (!res.ok) {
+      const e = await res.json().catch(()=>({}));
+      throw new Error(e.error || "Docs API " + res.status);
+    }
+    return res.json();
+  } catch(e) {
+    throw new Error("Document search failed: " + e.message);
+  }
 }
 
 async function fetchDocStats() {
   const isArtifact = typeof window !== "undefined"
     && window.location.hostname.endsWith("claude.ai");
-  if (isArtifact) return {eoc:0, dental:0, total:0, ready:false};
+  if (isArtifact) return {eoc:15, dental:4, total:19, ready:true};
   try {
     const res = await fetch("/api/docs", {
-      method:"POST",
-      headers:{"Content-Type":"application/json"},
-      body: JSON.stringify({action:"stats"}),
+      method:  "POST",
+      headers: {"Content-Type":"application/json"},
+      body:    JSON.stringify({action:"stats"}),
     });
     return res.ok ? res.json() : {eoc:0,dental:0,total:0,ready:false};
-  } catch(_){ return {eoc:0,dental:0,total:0,ready:false}; }
+  } catch(_) { return {eoc:0,dental:0,total:0,ready:false}; }
 }
 
 function SourceChip({src}) {
@@ -2384,6 +2974,304 @@ function DocPlayground() {
 }
 
 
+
+// ─── 365 HWAI MA CALENDAR PANEL ───────────────────────────────────────────────
+function CalendarPanel() {
+  const now      = new Date();
+  const [selMonth, setSelMonth] = useState(now.getMonth() + 1);
+  const [selEvt,   setSelEvt]   = useState(null);
+  const [filter,   setFilter]   = useState("all"); // all | cms | hwai
+
+  const FULL_MONTHS = [
+    "January","February","March","April","May","June",
+    "July","August","September","October","November","December"
+  ];
+
+  const filtered = CALENDAR_EVENTS.filter(function(e){
+    return e.month === selMonth && (filter==="all" || e.type===filter);
+  }).sort(function(a,b){ return a.day - b.day; });
+
+  // Next upcoming event
+  const today    = now.getMonth()*100 + now.getDate();
+  const upcoming = CALENDAR_EVENTS
+    .filter(function(e){ return e.month*100+e.day >= today; })
+    .sort(function(a,b){ return (a.month*100+a.day)-(b.month*100+b.day) ;})[0];
+
+  // Count events per month for the mini-bar
+  const monthlyCounts = MONTH_NAMES.map(function(_,i){
+    const mn = i+1;
+    return {
+      cms:  CALENDAR_EVENTS.filter(function(e){ return e.month===mn&&e.type==="cms"; }).length,
+      hwai: CALENDAR_EVENTS.filter(function(e){ return e.month===mn&&e.type==="hwai"; }).length,
+    };
+  });
+
+  return (
+    <div style={{flex:1,display:"flex",flexDirection:"column",overflow:"hidden",
+      background:"#F8FAFC"}}>
+
+      {/* Header */}
+      <div style={{padding:"14px 20px 10px",background:"#fff",
+        borderBottom:"1px solid #E2E8F0",flexShrink:0}}>
+        <div style={{display:"flex",alignItems:"center",
+          justifyContent:"space-between",gap:12}}>
+          <div style={{display:"flex",alignItems:"center",gap:10}}>
+            <span style={{fontSize:20}}>📅</span>
+            <div>
+              <div style={{fontWeight:700,fontSize:14,color:"#0F172A",lineHeight:1.2}}>
+                365 HWAI MA Calendar
+              </div>
+              <div style={{fontSize:11,color:"#94A3B8",marginTop:1}}>
+                CMS milestones and HealthWorksAI dashboard refresh schedule
+              </div>
+            </div>
+          </div>
+          {/* Filter pills */}
+          <div style={{display:"flex",gap:5}}>
+            {[
+              {id:"all",  label:"All Events",   color:"#475569"},
+              {id:"cms",  label:"CMS Events",   color:"#2563EB"},
+              {id:"hwai", label:"HWAI Refreshes",color:"#0D9488"},
+            ].map(function(f){
+              const isA = filter===f.id;
+              return (
+                <button key={f.id} onClick={function(){setFilter(f.id);setSelEvt(null);}}
+                  style={{padding:"4px 12px",borderRadius:20,cursor:"pointer",
+                    fontFamily:"inherit",fontSize:11,fontWeight:isA?700:400,
+                    background:isA?f.color:"#F1F5F9",
+                    color:isA?"#fff":f.color,
+                    border:"1px solid "+(isA?f.color:"#E2E8F0")}}>
+                  {f.label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+
+      <div style={{flex:1,display:"flex",overflow:"hidden"}}>
+
+        {/* Left: month nav + mini timeline */}
+        <div style={{width:220,background:"#fff",borderRight:"1px solid #E2E8F0",
+          display:"flex",flexDirection:"column",flexShrink:0,overflowY:"auto"}}>
+
+          {/* Next upcoming banner */}
+          {upcoming && (
+            <div style={{margin:"12px 10px 4px",padding:"10px 12px",
+              background:"#FFF7ED",borderRadius:10,
+              border:"1px solid #FED7AA",cursor:"pointer"}}
+              onClick={function(){
+                setSelMonth(upcoming.month);
+                setSelEvt(null);
+              }}>
+              <div style={{fontSize:9.5,fontWeight:700,color:"#D97706",
+                textTransform:"uppercase",letterSpacing:".07em",marginBottom:3}}>
+                ⚡ Next Up
+              </div>
+              <div style={{fontSize:12,fontWeight:700,color:"#1E293B",
+                lineHeight:1.3,marginBottom:2}}>
+                {upcoming.label}
+              </div>
+              <div style={{fontSize:10.5,color:"#64748B"}}>
+                {FULL_MONTHS[upcoming.month-1]} {upcoming.day}
+              </div>
+            </div>
+          )}
+
+          {/* Month list */}
+          <div style={{padding:"8px 6px",flex:1}}>
+            {FULL_MONTHS.map(function(m,i){
+              const mn   = i+1;
+              const isS  = selMonth===mn;
+              const cnt  = monthlyCounts[i];
+              const isNow= mn===now.getMonth()+1;
+              return (
+                <button key={m}
+                  onClick={function(){setSelMonth(mn);setSelEvt(null);}}
+                  style={{
+                    width:"100%",display:"flex",alignItems:"center",
+                    gap:8,padding:"7px 10px",borderRadius:8,border:"none",
+                    cursor:"pointer",fontFamily:"inherit",marginBottom:2,
+                    background:isS?"#EFF6FF":"transparent",
+                    textAlign:"left",
+                  }}>
+                  <div style={{
+                    width:28,height:28,borderRadius:8,flexShrink:0,
+                    background:isS?"#2563EB":isNow?"#EFF6FF":"#F8FAFC",
+                    display:"flex",alignItems:"center",justifyContent:"center",
+                    fontSize:11,fontWeight:700,
+                    color:isS?"#fff":isNow?"#2563EB":"#94A3B8",
+                    border:isNow&&!isS?"1.5px solid #BFDBFE":"none",
+                  }}>
+                    {mn}
+                  </div>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{fontSize:12,fontWeight:isS?700:400,
+                      color:isS?"#1E40AF":"#374151"}}>
+                      {m}
+                      {isNow&&<span style={{marginLeft:5,fontSize:8,
+                        background:"#DBEAFE",color:"#1D4ED8",
+                        padding:"1px 5px",borderRadius:10,fontWeight:600}}>
+                        NOW
+                      </span>}
+                    </div>
+                    <div style={{display:"flex",gap:4,marginTop:2}}>
+                      {cnt.cms>0&&(
+                        <span style={{fontSize:9,background:"#DBEAFE",
+                          color:"#1D4ED8",padding:"0 4px",borderRadius:8,
+                          fontWeight:600}}>
+                          {cnt.cms} CMS
+                        </span>
+                      )}
+                      {cnt.hwai>0&&(
+                        <span style={{fontSize:9,background:"#CCFBF1",
+                          color:"#0F766E",padding:"0 4px",borderRadius:8,
+                          fontWeight:600}}>
+                          {cnt.hwai} HWAI
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Right: event list for selected month */}
+        <div style={{flex:1,overflowY:"auto",padding:"20px 24px"}}>
+          <div style={{display:"flex",alignItems:"center",
+            justifyContent:"space-between",marginBottom:16}}>
+            <h2 style={{margin:0,fontSize:18,fontWeight:700,color:"#0F172A"}}>
+              {FULL_MONTHS[selMonth-1]}
+            </h2>
+            <span style={{fontSize:12,color:"#94A3B8"}}>
+              {filtered.length} event{filtered.length!==1?"s":""}
+            </span>
+          </div>
+
+          {filtered.length===0 && (
+            <div style={{textAlign:"center",padding:"40px 0",color:"#94A3B8"}}>
+              <div style={{fontSize:32,marginBottom:8}}>📭</div>
+              <div style={{fontSize:13}}>No events this month</div>
+            </div>
+          )}
+
+          <div style={{display:"flex",flexDirection:"column",gap:10}}>
+            {filtered.map(function(e,i){
+              const isCMS  = e.type==="cms";
+              const isHWAI = e.type==="hwai";
+              const isSel  = selEvt===i;
+              return (
+                <div key={i}
+                  onClick={function(){setSelEvt(isSel?null:i);}}
+                  style={{
+                    background:"#fff",borderRadius:12,
+                    border:"1px solid "+(isSel
+                      ? (isCMS?"#93C5FD":"#5EEAD4")
+                      : "#E2E8F0"),
+                    cursor:"pointer",overflow:"hidden",
+                    boxShadow:isSel?"0 2px 12px rgba(0,0,0,.08)":"none",
+                    transition:"all .15s",
+                  }}>
+                  {/* Event header */}
+                  <div style={{
+                    padding:"12px 16px",
+                    borderLeft:"3px solid "+(isCMS?"#2563EB":"#0D9488"),
+                    display:"flex",alignItems:"center",gap:12,
+                  }}>
+                    {/* Date badge */}
+                    <div style={{
+                      width:42,height:42,borderRadius:10,flexShrink:0,
+                      background:isCMS?"#EFF6FF":"#F0FDFA",
+                      display:"flex",flexDirection:"column",
+                      alignItems:"center",justifyContent:"center",
+                    }}>
+                      <div style={{fontSize:8.5,fontWeight:700,
+                        color:isCMS?"#2563EB":"#0D9488",
+                        textTransform:"uppercase",letterSpacing:".05em"}}>
+                        {MONTH_NAMES[e.month-1]}
+                      </div>
+                      <div style={{fontSize:16,fontWeight:800,
+                        color:isCMS?"#1D4ED8":"#0F766E",lineHeight:1.1}}>
+                        {e.day}
+                      </div>
+                    </div>
+
+                    {/* Label + type badge */}
+                    <div style={{flex:1,minWidth:0}}>
+                      <div style={{display:"flex",alignItems:"center",gap:6,
+                        marginBottom:3}}>
+                        <span style={{
+                          fontSize:9,fontWeight:700,
+                          background:isCMS?"#2563EB":"#0D9488",
+                          color:"#fff",padding:"1px 6px",borderRadius:10,
+                          textTransform:"uppercase",letterSpacing:".05em",
+                          flexShrink:0,
+                        }}>
+                          {isCMS?"CMS":"HWAI"}
+                        </span>
+                        {isSel&&(
+                          <span style={{marginLeft:"auto",fontSize:11,
+                            color:"#94A3B8"}}>▲ collapse</span>
+                        )}
+                        {!isSel&&(
+                          <span style={{marginLeft:"auto",fontSize:11,
+                            color:"#CBD5E1"}}>▼ details</span>
+                        )}
+                      </div>
+                      <div style={{fontSize:13,fontWeight:600,
+                        color:"#1E293B",lineHeight:1.35}}>
+                        {e.label}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Expanded detail */}
+                  {isSel && (
+                    <div style={{
+                      padding:"10px 16px 14px 16px",
+                      background:isCMS?"#F0F7FF":"#F0FDFA",
+                      borderTop:"1px solid "+(isCMS?"#BFDBFE":"#99F6E4"),
+                      fontSize:12.5,color:"#374151",lineHeight:1.7,
+                    }}>
+                      {e.detail}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Legend */}
+          <div style={{display:"flex",gap:16,marginTop:24,padding:"12px 16px",
+            background:"#fff",borderRadius:10,border:"1px solid #E2E8F0"}}>
+            <div>
+              <div style={{fontSize:10,fontWeight:700,color:"#2563EB",
+                textTransform:"uppercase",letterSpacing:".07em",marginBottom:4}}>
+                CMS Events
+              </div>
+              <div style={{fontSize:11,color:"#64748B",lineHeight:1.6}}>
+                Official CMS release dates, enrollment periods, and regulatory milestones.
+              </div>
+            </div>
+            <div style={{width:1,background:"#E2E8F0",flexShrink:0}}/>
+            <div>
+              <div style={{fontSize:10,fontWeight:700,color:"#0D9488",
+                textTransform:"uppercase",letterSpacing:".07em",marginBottom:4}}>
+                HWAI Refreshes
+              </div>
+              <div style={{fontSize:11,color:"#64748B",lineHeight:1.6}}>
+                HealthWorksAI dashboard and data refresh schedule aligned to CMS releases.
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const [payor,setPayor]=useState(null);
   const [aDB,setADB]=useState(null);
@@ -2474,6 +3362,7 @@ export default function App() {
             : aTool&&aTool.id==="news"      ? <NewsPanel/>
             : aTool&&aTool.id==="quiz"         ? <QuizPanel/>
             : aTool&&aTool.id==="docplayground" ? <DocPlayground/>
+            : aTool&&aTool.id==="calendar"      ? <CalendarPanel/>
             : null
           }
         </div>
