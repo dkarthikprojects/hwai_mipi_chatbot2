@@ -78,12 +78,22 @@ async function searchChunks(db, embedding, docType, topK) {
 // ── GPT-4o answer with citations ──────────────────────────────────────────────
 async function generateAnswer(question, chunks) {
   const apiKey = process.env.OPENAI_API_KEY;
+  // Clean XML/metadata noise from chunks before sending to GPT-4o
+  const cleanText = (text) => {
+    if (!text) return "";
+    return text
+      .replace(/<[^>]+>/g, " ")
+      .replace(/&[a-z#0-9]+;/gi, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+  };
+
   const context = chunks.map((c, i) =>
     `--- Source ${i+1} ---\n`
     + `Document: ${c.doc_name}\n`
     + `Type: ${c.doc_type?.toUpperCase()}\n`
     + `Page: ${c.page_number || "?"} | Section: ${c.section || "General"}\n\n`
-    + c.chunk_text
+    + cleanText(c.chunk_text)
   ).join("\n\n");
 
   const prompt =
@@ -116,28 +126,41 @@ async function generateAnswer(question, chunks) {
 
 // ── Stats handler ─────────────────────────────────────────────────────────────
 async function handleStats(db) {
-  // Use count with grouping via RPC to avoid row limit
-  const { data, error } = await db
-    .from("document_chunks")
-    .select("doc_name, doc_type", { count: "exact" })
-    .limit(5000);
+  // Fetch ALL doc_name + doc_type without row limit by paginating
+  let allRows = [];
+  let page    = 0;
+  const PAGE  = 1000;
 
-  if (error) return { total: 0, eoc: 0, dental: 0, ready: false };
+  while (true) {
+    const { data, error } = await db
+      .from("document_chunks")
+      .select("doc_name, doc_type")
+      .range(page * PAGE, (page + 1) * PAGE - 1);
 
+    if (error || !data || data.length === 0) break;
+    allRows = allRows.concat(data);
+    if (data.length < PAGE) break; // last page
+    page++;
+  }
+
+  // Deduplicate by doc_name
   const byDoc = {};
-  (data || []).forEach(r => {
+  allRows.forEach(r => {
     if (!byDoc[r.doc_name]) byDoc[r.doc_name] = r.doc_type;
   });
 
-  const docs   = Object.entries(byDoc);
+  const docs       = Object.entries(byDoc);
   const eocDocs    = docs.filter(([,t]) => t === "eoc").length;
   const dentalDocs = docs.filter(([,t]) => t === "dental").length;
 
+  console.log("[docs/stats] total docs:", docs.length,
+    "| eoc:", eocDocs, "| dental:", dentalDocs);
+
   return {
-    total:   docs.length,
-    eoc:     eocDocs,
-    dental:  dentalDocs,
-    ready:   docs.length > 0,
+    total:     docs.length,
+    eoc:       eocDocs,
+    dental:    dentalDocs,
+    ready:     docs.length > 0,
     documents: docs.map(([name, type]) => ({ name, type })),
   };
 }
@@ -189,6 +212,16 @@ export default async function handler(req, res) {
       const answer = await generateAnswer(question, chunks);
 
       // 4. Format sources for UI chips
+      // Strip XML tags from chunk_text preview for clean display
+      const cleanPreview = (text) => {
+        if (!text) return "";
+        return text
+          .replace(/<[^>]+>/g, " ")          // strip XML/HTML tags
+          .replace(/&[a-z]+;/gi, " ")         // strip HTML entities
+          .replace(/\s+/g, " ")               // collapse whitespace
+          .trim()
+          .slice(0, 300);
+      };
       const sources = chunks.map(c => ({
         doc_name:   c.doc_name,
         doc_type:   c.doc_type,
@@ -196,9 +229,8 @@ export default async function handler(req, res) {
         section:    c.section || "General",
         similarity: c.similarity
           ? (c.similarity * 100).toFixed(0) + "%" : null,
-        chunk_text: c.chunk_text
-          ? c.chunk_text.slice(0, 300) + (c.chunk_text.length > 300 ? "..." : "")
-          : "",
+        chunk_text: cleanPreview(c.chunk_text)
+          + (c.chunk_text && c.chunk_text.length > 300 ? "..." : ""),
       }));
 
       return res.status(200).json({ answer, sources });

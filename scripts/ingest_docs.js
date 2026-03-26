@@ -34,27 +34,44 @@ if (!OPENAI_KEY) {
 
 const db = createClient(SUPABASE_URL, SUPABASE_KEY, { auth: { persistSession: false } });
 
-// ── Simple PDF text extractor (no external library) ───────────────────────────
+// ── PDF text extractor ───────────────────────────────────────────────────────
+// Extracts readable text from PDF BT/ET blocks, filtering out XML metadata
 function extractTextFromPdf(buffer) {
-  const content = buffer.toString("latin1");
-  const chunks  = [];
-  // Extract text between BT and ET markers (basic PDF text extraction)
-  const btEt = content.match(/BT[\s\S]*?ET/g) || [];
-  btEt.forEach(block => {
-    const strings = block.match(/\(([^)]{1,500})\)\s*Tj/g) || [];
-    strings.forEach(s => {
-      const text = s.replace(/^\(/, "").replace(/\)\s*Tj$/, "").trim();
-      if (text.length > 2) chunks.push(text);
+  const content = buffer.toString("binary");
+  const lines   = [];
+
+  // 1. Extract text from BT...ET blocks (actual page text)
+  const btEtBlocks = content.match(/BT[\s\S]{1,5000}?ET/g) || [];
+  btEtBlocks.forEach(block => {
+    // Tj operator: (text)Tj
+    const tjMatches = block.match(/\(([^)]{1,300})\)\s*Tj/g) || [];
+    tjMatches.forEach(m => {
+      const text = m.replace(/^\(/, "").replace(/\)\s*Tj$/, "")
+        .replace(/\n/g, "
+").replace(/\r/g, "").trim();
+      if (text.length > 3 && /[a-zA-Z]/.test(text)) lines.push(text);
+    });
+
+    // TJ operator: [(text) spacing (text)] TJ
+    const tjArrays = block.match(/\[([^\]]{1,500})\]\s*TJ/g) || [];
+    tjArrays.forEach(m => {
+      const parts = m.match(/\(([^)]{1,200})\)/g) || [];
+      const text  = parts.map(p => p.slice(1,-1)).join("").trim();
+      if (text.length > 3 && /[a-zA-Z]/.test(text)) lines.push(text);
     });
   });
-  // Also try to extract raw text streams
-  const streams = content.match(/stream\r?\n([\s\S]*?)\r?\nendstream/g) || [];
-  streams.forEach(stream => {
-    const inner = stream.replace(/^stream\r?\n/, "").replace(/\r?\nendstream$/, "");
-    const printable = inner.replace(/[^\x20-\x7E\n\r\t]/g, " ").replace(/\s+/g, " ").trim();
-    if (printable.length > 50) chunks.push(printable.slice(0, 2000));
-  });
-  return chunks.join(" ").replace(/\s+/g, " ").trim();
+
+  // 2. Deduplicate adjacent identical lines
+  const deduped = lines.filter((l, i) => i === 0 || l !== lines[i-1]);
+
+  // 3. Join and clean
+  const raw = deduped.join(" ")
+    .replace(/[^ -~
+]/g, " ")  // printable ASCII only
+    .replace(/\s+/g, " ")
+    .trim();
+
+  return raw;
 }
 
 // ── Chunk text ────────────────────────────────────────────────────────────────
