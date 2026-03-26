@@ -25,9 +25,24 @@ function getDB() {
 // ── Deduplicate plan rows by Bid_id ───────────────────────────────────────────
 // Stars_Landscape has one row per plan-county. Bid_id is the unique plan ID.
 function dedupByBid(rows) {
+  if (!rows || rows.length === 0) return [];
+  // Find the bid column name dynamically from the first row
+  // Handles Bid_id, bid_id, BID_ID, BIDID etc.
+  const firstRow = rows[0];
+  const bidCol = Object.keys(firstRow).find(k =>
+    k.toLowerCase().replace("_","") === "bidid"
+  );
+  console.log("[dedupByBid] rows:", rows.length,
+    "| bid col found:", bidCol || "NONE",
+    "| sample keys:", Object.keys(firstRow).join(","));
+  if (!bidCol) {
+    // No bid column — return all rows deduplicated by JSON
+    console.warn("[dedupByBid] WARNING: no Bid_id column found, returning all rows");
+    return rows;
+  }
   const seen = new Set();
   return rows.filter(r => {
-    const k = r.Bid_id || r.bid_id;
+    const k = r[bidCol];
     if (!k || seen.has(k)) return false;
     seen.add(k); return true;
   });
@@ -38,16 +53,52 @@ function dedupByBid(rows) {
 // Keeping tool results small is critical: large JSON payloads cause
 // GPT-4o to time out or return empty responses on the second call.
 
+// Map full state names → abbreviations to handle GPT-4o passing "Florida" vs "FL"
+const STATE_MAP = {
+  "alabama":"AL","alaska":"AK","arizona":"AZ","arkansas":"AR","california":"CA",
+  "colorado":"CO","connecticut":"CT","delaware":"DE","florida":"FL","georgia":"GA",
+  "hawaii":"HI","idaho":"ID","illinois":"IL","indiana":"IN","iowa":"IA",
+  "kansas":"KS","kentucky":"KY","louisiana":"LA","maine":"ME","maryland":"MD",
+  "massachusetts":"MA","michigan":"MI","minnesota":"MN","mississippi":"MS",
+  "missouri":"MO","montana":"MT","nebraska":"NE","nevada":"NV",
+  "new hampshire":"NH","new jersey":"NJ","new mexico":"NM","new york":"NY",
+  "north carolina":"NC","north dakota":"ND","ohio":"OH","oklahoma":"OK",
+  "oregon":"OR","pennsylvania":"PA","rhode island":"RI","south carolina":"SC",
+  "south dakota":"SD","tennessee":"TN","texas":"TX","utah":"UT","vermont":"VT",
+  "virginia":"VA","washington":"WA","west virginia":"WV","wisconsin":"WI",
+  "wyoming":"WY","puerto rico":"PR","district of columbia":"DC",
+};
+
+function normaliseState(s) {
+  if (!s) return null;
+  const lower = s.toLowerCase().trim();
+  return STATE_MAP[lower] || s.toUpperCase().trim();
+}
+
 async function queryLandscape(db, p) {
-  const stateList = p.states || (p.state ? [p.state] : null);
+  // Normalise state filters — GPT-4o may pass "Florida" or "FL" or "florida"
+  const rawStates = p.states || (p.state ? [p.state] : null);
+  const stateList = rawStates ? rawStates.map(normaliseState).filter(Boolean) : null;
   let q = db.from("Stars_Landscape")
     .select("Bid_id,parent_organization,State,County,Star_Rating,Bench_mark");
   if (stateList?.length)  q = q.in("State", stateList);
   if (p.county)           q = q.ilike("County", `%${p.county}%`);
   if (p.parent_org)       q = q.ilike("parent_organization", `%${p.parent_org}%`);
   if (p.min_stars)        q = q.gte("Star_Rating", String(p.min_stars));
-  const { data: raw, error } = await q.limit(10000);
+  const { data: raw, error, count } = await q.limit(10000);
   if (error) throw new Error("Stars_Landscape: " + error.message);
+
+  // Safety check — if no rows at all, return a clear diagnostic
+  if (!raw || raw.length === 0) {
+    return {
+      unique_plan_count: 0,
+      raw_row_count:     0,
+      filters_applied:   { states: stateList, county: p.county||null },
+      diagnostic:        "No rows returned from Stars_Landscape. " +
+        "Check that State column values match filter (e.g. 'FL' not 'Florida').",
+      source: "Stars_Landscape table",
+    };
+  }
 
   const plans    = dedupByBid(raw);
   const stars    = plans.map(r => parseFloat(r.Star_Rating)).filter(n => !isNaN(n));
@@ -64,8 +115,12 @@ async function queryLandscape(db, p) {
     .sort((a,b) => b[1]-a[1]).slice(0,10)
     .map(([org, cnt]) => ({ org, plans: cnt }));
 
+  console.log("[queryLandscape] raw:", raw.length,
+    "deduped:", plans.length, "states:", stateList);
+
   return {
     unique_plan_count: plans.length,
+    raw_row_count:     raw.length,
     unique_payors:     Object.keys(byOrg).length,
     avg_star_rating:   avgStar,
     four_plus_count:   fourPlus,
@@ -73,13 +128,17 @@ async function queryLandscape(db, p) {
       ? ((fourPlus/plans.length)*100).toFixed(1)+"%" : "0%",
     by_state:          byState,
     top_10_payors:     topPayors,
-    filters:           { states: stateList, county: p.county||null, org: p.parent_org||null },
-    source:            "Stars_Landscape — unique Bid_id count",
+    filters_applied:   { states: stateList, county: p.county||null, org: p.parent_org||null },
+    note: plans.length === 0 && raw.length > 0
+      ? "Rows found but dedup returned 0 — check Bid_id column name in DB"
+      : null,
+    source: "Stars_Landscape table — unique plans by Bid_id",
   };
 }
 
 async function queryEnrollment(db, p) {
-  const stateList = p.states || (p.state ? [p.state] : null);
+  const rawStates2 = p.states || (p.state ? [p.state] : null);
+  const stateList = rawStates2 ? rawStates2.map(normaliseState).filter(Boolean) : null;
   let q = db.from("HWAI_Enrollment")
     .select("State,Parent_Organization,Plan_Type,Special_Needs_Plan_Type,DSNP_Eligible,MA_Eligible,Enrollment,Month,Year");
   if (stateList?.length)  q = q.in("State", stateList);
@@ -160,7 +219,8 @@ async function queryDrugRankings(db, p) {
 }
 
 async function queryTPV(db, p) {
-  const stateList = p.states || (p.state ? [p.state] : null);
+  const rawStates3 = p.states || (p.state ? [p.state] : null);
+  const stateList = rawStates3 ? rawStates3.map(normaliseState).filter(Boolean) : null;
   let q = db.from("TPV_Crosswalk")
     .select("bid_id,State,Plan_Name,plan_type,parent_organization,SNP,Special_Needs_Plan_Type,DVH,OTC,Inpatient,Transport,SSBCI,Feb_enrollments,Dec_enrollments");
   if (stateList?.length)  q = q.in("State", stateList);
