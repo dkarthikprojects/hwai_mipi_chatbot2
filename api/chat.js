@@ -48,11 +48,9 @@ async function queryLandscape(db, p) {
   const rawStates = p.states || (p.state ? [p.state] : null);
   const stateList = rawStates ? rawStates.map(toAbbr).filter(Boolean) : null;
 
-  // Use only safe column names (no %, *, spaces)
-  let q = db.from("Stars_Landscape").select(
-    "Bid_id,CONTRACT_ID,Plan_ID,Plan_Name,parent_organization," +
-    "State,County,Star_Rating,Bench_mark,Crosswalk,year"
-  );
+  // Use select('*') to avoid PostgREST column parsing issues
+  // then filter fields in JS
+  let q = db.from("Stars_Landscape").select("*");
 
   if (stateList?.length) q = q.in("State", stateList);
   if (p.county)          q = q.ilike("County", `%${p.county}%`);
@@ -68,7 +66,7 @@ async function queryLandscape(db, p) {
   // If still 0 rows — sample unfiltered to diagnose
   if (!raw || raw.length === 0) {
     const { data: s } = await db.from("Stars_Landscape")
-      .select("Bid_id,State").limit(5);
+      .select("*").limit(5);
     console.log("[Landscape] unfiltered sample:", JSON.stringify(s));
     return {
       unique_plan_count: 0,
@@ -125,11 +123,7 @@ async function queryLandscape(db, p) {
 async function queryEnrollment(db, p) {
   const rawStates = p.states || (p.state ? [p.state] : null);
   const stateList = rawStates ? rawStates.map(toAbbr).filter(Boolean) : null;
-  let q = db.from("HWAI_Enrollment").select(
-    "State,County,CPID,Month,Year,Parent_Organization," +
-    "Plan_Type,Plan_Name,Special_Needs_Plan_Type," +
-    "DSNP_Eligible,MA_Eligible,Enrollment"
-  );
+  let q = db.from("HWAI_Enrollment").select("*");
   if (stateList?.length) q = q.in("State", stateList);
   if (p.county)          q = q.ilike("County", `%${p.county}%`);
   if (p.parent_org)      q = q.ilike("Parent_Organization", `%${p.parent_org}%`);
@@ -225,11 +219,7 @@ async function queryDrugRankings(db, p) {
 async function queryTPV(db, p) {
   const rawStates = p.states || (p.state ? [p.state] : null);
   const stateList = rawStates ? rawStates.map(toAbbr).filter(Boolean) : null;
-  let q = db.from("TPV_Crosswalk").select(
-    "bid_id,State,County,Plan_Name,plan_type,parent_organization," +
-    "SNP,Special_Needs_Plan_Type,DVH,OTC,Inpatient,Transport,SSBCI," +
-    "Feb_enrollments,Dec_enrollments"
-  );
+  let q = db.from("TPV_Crosswalk").select("*");
   if (stateList?.length) q = q.in("State", stateList);
   if (p.county)          q = q.ilike("County",              `%${p.county}%`);
   if (p.parent_org)      q = q.ilike("parent_organization", `%${p.parent_org}%`);
