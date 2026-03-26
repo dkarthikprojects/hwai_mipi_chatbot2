@@ -122,12 +122,13 @@ const ATOOLS = [
     name: "query_landscape_data",
     description: "Query Stars_Landscape table for MA plan data — "
       + "bid IDs, plan names, star ratings, benchmarks, crosswalk status. "
+      + "IMPORTANT: pass state as full name OR abbreviation e.g. 'Florida' or 'FL'. "
       + "Filter by State, County, parent_organization, Star_Rating.",
     input_schema: {
       type: "object",
       properties: {
-        state:      {type:"string", description:"Two-letter state code e.g. FL"},
-        states:     {type:"array",  items:{type:"string"}, description:"Multiple states"},
+        state:      {type:"string", description:"State name e.g. 'Florida' or abbreviation 'FL'"},
+        states:     {type:"array",  items:{type:"string"}, description:"Multiple states e.g. ['Florida','Texas']"},
         county:     {type:"string", description:"County name (partial match)"},
         parent_org: {type:"string", description:"Payor/org name (partial match)"},
         min_stars:  {type:"number", description:"Minimum star rating e.g. 4"},
@@ -576,11 +577,24 @@ const QPILLS=[
 ];
 
 function QueriesPanel({payor}) {
-  const sys="You are MIPI POWER HOUSE - HealthWorksAI MA intelligence assistant. "
+  const sys="You are GenieAI — HealthWorksAI Medicare Advantage intelligence assistant. "
     +"User is a payor professional from "+payor.label+". "
-    +"Answer concisely using PY2026 CMS data for CA, FL, TX. "
-    +"Call tools to fetch data. Always cite your source. "
-    +"Suggest 2 relevant follow-up questions after each answer.\n\n"
+    +"\n\n"
+    +"CRITICAL INSTRUCTIONS:\n"
+    +"1. You MUST call a tool for EVERY question about plans, enrollment, stars, TPV, or drugs. "
+    +"NEVER answer from your training knowledge — always query the live database.\n"
+    +"2. Available tools and their Supabase tables:\n"
+    +"   - query_landscape_data → Stars_Landscape table (plan counts, star ratings, benchmarks)\n"
+    +"   - query_enrollment_data → HWAI_Enrollment table (member counts, market share)\n"
+    +"   - query_stars_data → Stars_Cutpoint table (CMS star rating cutpoints)\n"
+    +"   - query_formulary_data → PartD_MRx table (drug tiers, benefits)\n"
+    +"   - query_drug_rankings → PartD_Ranking table (top drugs by spend/claims)\n"
+    +"   - query_tpv_data → TPV_Crosswalk table (Total Plan Value YoY)\n"
+    +"3. For plan count questions (e.g. 'how many plans in FL') → call query_landscape_data "
+    +"with state='FL'.\n"
+    +"4. After receiving tool results, report the EXACT numbers from the database. "
+    +"Do not say data is unavailable if the tool returned results.\n"
+    +"5. Always cite the source table name in your answer.\n\n"
     +GUARDRAILS;
   const welcome="Welcome, **"+payor.label
     +"** team! Ask me anything about MA plans, premiums, benefits, or stars.";

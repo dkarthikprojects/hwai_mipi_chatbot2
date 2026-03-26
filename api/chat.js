@@ -79,10 +79,17 @@ async function queryLandscape(db, p) {
   }
 
   // Deduplicate by Bid_id
+  // Find bid column dynamically - handles Bid_id, bid_id, BID_ID etc
+  const bidKey = raw.length > 0
+    ? Object.keys(raw[0]).find(k => k.toLowerCase().replace('_','') === 'bidid')
+    : 'Bid_id';
+  console.log("[Landscape] bid column found:", bidKey,
+    "| sample keys:", raw.length>0 ? Object.keys(raw[0]).join(',') : 'no rows');
   const seen = new Set();
   const plans = raw.filter(r => {
-    if (!r.Bid_id || seen.has(r.Bid_id)) return false;
-    seen.add(r.Bid_id); return true;
+    const bid = r[bidKey];
+    if (!bid || seen.has(bid)) return false;
+    seen.add(bid); return true;
   });
 
   console.log("[Landscape] deduped plans:", plans.length);
@@ -159,7 +166,7 @@ async function queryEnrollment(db, p) {
 // Safe columns only: CONTRACT_ID, Year
 
 async function queryStars(db, p) {
-  let q = db.from("Stars_Cutpoint").select("CONTRACT_ID,Year");
+  let q = db.from("Stars_Cutpoint").select("*");
   if (p.contract_id) q = q.eq("CONTRACT_ID", p.contract_id);
   if (p.year)        q = q.eq("Year", p.year);
   const { data, error } = await q.limit(2000);
@@ -176,7 +183,7 @@ async function queryStars(db, p) {
 // "Tier Type" must be accessed carefully
 
 async function queryFormulary(db, p) {
-  let q = db.from("PartD_MRx").select("bid_id,Tier,Benefit,BenefitValue");
+  let q = db.from("PartD_MRx").select("*");
   if (p.bid_id)  q = q.eq("bid_id", p.bid_id);
   if (p.tier)    q = q.eq("Tier", String(p.tier));
   if (p.benefit) q = q.ilike("Benefit", `%${p.benefit}%`);
@@ -196,10 +203,7 @@ async function queryFormulary(db, p) {
 // total_dosage_units, total_claims, total_beneficiaries, Brand_Name, Brand_YN
 
 async function queryDrugRankings(db, p) {
-  let q = db.from("PartD_Ranking").select(
-    "rxnorm_description,prime_disease,total_spending," +
-    "total_claims,total_beneficiaries,Brand_Name,Brand_YN"
-  );
+  let q = db.from("PartD_Ranking").select("*");
   if (p.disease)   q = q.ilike("prime_disease",      `%${p.disease}%`);
   if (p.brand_yn)  q = q.eq("Brand_YN",              p.brand_yn);
   if (p.drug_name) q = q.ilike("rxnorm_description", `%${p.drug_name}%`);
