@@ -1,4 +1,9 @@
 import { useState, useRef, useEffect, useCallback } from "react";
+import {
+  BarChart, Bar, LineChart, Line, PieChart, Pie, Cell,
+  XAxis, YAxis, CartesianGrid, Tooltip, Legend,
+  ResponsiveContainer, ReferenceLine,
+} from "recharts";
 
 const SCROLL_CSS = [
   "*::-webkit-scrollbar{width:6px;height:6px}",
@@ -795,21 +800,153 @@ function useChat(sys, welcome, initialMsgs, initialHist) {
   return {msgs,busy,err,setErr,send};
 }
 
-function CInput({onSend,busy,color,ph}) {
-  const [v,setV]=useState("");
-  function go(){if(v.trim()){onSend(v);setV("");}}
+function CInput({onSend, busy, color, ph, showAttach}) {
+  const [v, setV]         = useState("");
+  const [files, setFiles] = useState([]);   // attached file previews
+  const fileRef           = useRef(null);
+
+  function go() {
+    if (!v.trim() && files.length === 0) return;
+    // Build message — append file names as context
+    let msg = v.trim();
+    if (files.length > 0) {
+      const names = files.map(function(f){ return f.name; }).join(", ");
+      msg = (msg ? msg + "\n\n" : "") + "[Attached files: " + names + "]";
+      // Prepend text content for CSV/TXT files
+      const textContent = files
+        .filter(function(f){ return f.content; })
+        .map(function(f){ return "--- " + f.name + " ---\n" + f.content; })
+        .join("\n\n");
+      if (textContent) msg = msg + "\n\n" + textContent;
+    }
+    onSend(msg);
+    setV("");
+    setFiles([]);
+  }
+
+  function onFileChange(e) {
+    const picked = Array.from(e.target.files || []);
+    picked.forEach(function(file) {
+      const isText = /\.(csv|txt|json|md)$/i.test(file.name);
+      if (isText) {
+        const reader = new FileReader();
+        reader.onload = function(ev) {
+          const content = (ev.target.result || "").slice(0, 8000); // cap at 8KB
+          setFiles(function(prev) {
+            return [...prev, { name: file.name, size: file.size, type: file.type, content }];
+          });
+        };
+        reader.readAsText(file);
+      } else {
+        setFiles(function(prev) {
+          return [...prev, { name: file.name, size: file.size, type: file.type, content: null }];
+        });
+      }
+    });
+    e.target.value = ""; // reset so same file can be re-added
+  }
+
+  function removeFile(idx) {
+    setFiles(function(prev){ return prev.filter(function(_,i){ return i!==idx; }); });
+  }
+
+  const ext = function(name) {
+    const m = name.match(/\.(\w+)$/);
+    return m ? m[1].toUpperCase() : "FILE";
+  };
+
+  const fileIcon = function(name) {
+    if (/\.csv$/i.test(name))  return "📊";
+    if (/\.pdf$/i.test(name))  return "📄";
+    if (/\.txt$/i.test(name))  return "📝";
+    if (/\.json$/i.test(name)) return "📋";
+    if (/\.(png|jpg|jpeg|gif|webp)$/i.test(name)) return "🖼️";
+    return "📎";
+  };
+
   return (
     <div style={{padding:"10px 16px",background:"#fff",
       borderTop:"1px solid #E2E8F0",flexShrink:0}}>
-      <div style={{display:"flex",gap:8,alignItems:"flex-end",background:"#F8FAFC",
+
+      {/* Attached file pills */}
+      {files.length > 0 && (
+        <div style={{display:"flex",flexWrap:"wrap",gap:5,marginBottom:7}}>
+          {files.map(function(f, i) {
+            return (
+              <div key={i} style={{
+                display:"flex",alignItems:"center",gap:5,
+                background:"#F0F7FF",border:"1px solid "+color+"33",
+                borderRadius:20,padding:"3px 10px 3px 7px",
+                fontSize:11,color:"#1E293B",
+              }}>
+                <span style={{fontSize:13}}>{fileIcon(f.name)}</span>
+                <span style={{maxWidth:140,overflow:"hidden",
+                  textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                  {f.name}
+                </span>
+                <span style={{fontSize:9,color:"#94A3B8",marginLeft:2}}>
+                  {(f.size/1024).toFixed(0)}KB
+                </span>
+                <button onClick={function(){removeFile(i);}}
+                  style={{background:"none",border:"none",cursor:"pointer",
+                    color:"#94A3B8",fontSize:13,padding:0,lineHeight:1,marginLeft:2}}>
+                  ×
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      <div style={{display:"flex",gap:6,alignItems:"flex-end",background:"#F8FAFC",
         borderRadius:10,border:"1.5px solid "+(busy?color+"88":"#E2E8F0"),
-        padding:"7px 12px"}}>
+        padding:"7px 10px"}}>
+
+        {/* + Attach button */}
+        {showAttach !== false && (
+          <>
+            <input
+              ref={fileRef}
+              type="file"
+              multiple
+              accept=".csv,.txt,.json,.md,.pdf,.png,.jpg,.jpeg"
+              onChange={onFileChange}
+              style={{display:"none"}}
+            />
+            <button
+              onClick={function(){ fileRef.current && fileRef.current.click(); }}
+              disabled={busy}
+              title="Attach files (CSV, TXT, JSON, PDF, images)"
+              style={{
+                background:"none",border:"1.5px solid "+(busy?"#E2E8F0":color+"55"),
+                borderRadius:7,width:28,height:28,
+                display:"flex",alignItems:"center",justifyContent:"center",
+                cursor:busy?"not-allowed":"pointer",
+                color:busy?"#CBD5E1":color,
+                fontSize:18,fontWeight:400,lineHeight:1,
+                flexShrink:0,transition:"all .15s",
+                padding:0,
+              }}
+              onMouseEnter={function(e){
+                if(!busy) e.currentTarget.style.background=color+"12";
+              }}
+              onMouseLeave={function(e){
+                e.currentTarget.style.background="none";
+              }}
+            >
+              +
+            </button>
+          </>
+        )}
+
         <textarea
           value={v}
           onChange={function(e){setV(e.target.value);}}
-          onKeyDown={function(e){if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();go();}}}
+          onKeyDown={function(e){
+            if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();go();}
+          }}
           disabled={busy} rows={1}
-          placeholder={ph||"Ask a question..."}
+          placeholder={files.length>0 ? "Add a message or send file as-is..." : ph||"Ask a question..."}
           style={{flex:1,background:"transparent",border:"none",outline:"none",
             resize:"none",fontSize:13.5,color:"#1E293B",fontFamily:"inherit",
             lineHeight:1.5,maxHeight:100,overflowY:"auto"}}
@@ -818,16 +955,30 @@ function CInput({onSend,busy,color,ph}) {
             e.target.style.height=Math.min(e.target.scrollHeight,100)+"px";
           }}
         />
+
         <button
-          onClick={go} disabled={busy||!v.trim()}
-          style={{background:busy||!v.trim()?"#E2E8F0":color,
-            color:busy||!v.trim()?"#94A3B8":"#fff",border:"none",borderRadius:7,
-            padding:"6px 14px",cursor:busy||!v.trim()?"not-allowed":"pointer",
-            fontWeight:600,fontSize:12.5,flexShrink:0,fontFamily:"inherit"}}
+          onClick={go}
+          disabled={busy||(!v.trim()&&files.length===0)}
+          style={{
+            background:busy||(!v.trim()&&files.length===0)?"#E2E8F0":color,
+            color:busy||(!v.trim()&&files.length===0)?"#94A3B8":"#fff",
+            border:"none",borderRadius:7,
+            padding:"6px 14px",
+            cursor:busy||(!v.trim()&&files.length===0)?"not-allowed":"pointer",
+            fontWeight:600,fontSize:12.5,flexShrink:0,fontFamily:"inherit",
+          }}
         >
           {busy?"...":"Send"}
         </button>
       </div>
+
+      {/* Helper hint */}
+      {files.length===0 && !busy && (
+        <div style={{fontSize:9.5,color:"#CBD5E1",marginTop:4,paddingLeft:2}}>
+          Press <kbd style={{background:"#F1F5F9",border:"1px solid #E2E8F0",
+            borderRadius:3,padding:"0 3px",fontSize:9}}>+</kbd> to attach CSV, PDF or documents
+        </div>
+      )}
     </div>
   );
 }
@@ -839,6 +990,238 @@ const QPILLS=[
   "Show star rating distribution for 2026",
 ];
 
+
+
+// ─── CHART RENDERER ────────────────────────────────────────────────────────────
+// GPT-4o embeds chart specs as JSON blocks: ```chart {...} ```
+// This component parses and renders them using recharts.
+
+const CHART_COLORS = [
+  "#4F46E5","#0891B2","#059669","#D97706","#DC2626",
+  "#7C3AED","#DB2777","#0284C7","#16A34A","#9333EA",
+];
+
+function ChartBlock({ spec }) {
+  const { type, title, data, xKey, yKey, yKeys, unit, note } = spec;
+
+  const fmt = function(v) {
+    if (typeof v !== "number") return v;
+    if (Math.abs(v) >= 1000000) return (v/1000000).toFixed(1)+"M";
+    if (Math.abs(v) >= 1000)    return (v/1000).toFixed(1)+"K";
+    return v.toLocaleString();
+  };
+
+  const tip = function({ active, payload, label }) {
+    if (!active || !payload || !payload.length) return null;
+    return (
+      <div style={{background:"#fff",border:"1px solid #E2E8F0",
+        borderRadius:8,padding:"8px 12px",fontSize:11,boxShadow:"0 2px 8px rgba(0,0,0,.1)"}}>
+        <div style={{fontWeight:700,marginBottom:4,color:"#1E293B"}}>{label}</div>
+        {payload.map(function(p,i){
+          return (
+            <div key={i} style={{color:p.color,display:"flex",gap:8,alignItems:"center"}}>
+              <div style={{width:8,height:8,borderRadius:"50%",background:p.color,flexShrink:0}}/>
+              <span style={{color:"#64748B"}}>{p.name}:</span>
+              <span style={{fontWeight:600,color:"#1E293B"}}>
+                {unit==="$" ? "$"+fmt(p.value) : fmt(p.value)+(unit||"")}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
+
+  const H = 280;
+
+  return (
+    <div style={{
+      background:"#fff",border:"1px solid #E2E8F0",
+      borderRadius:12,padding:"16px 20px",margin:"12px 0",
+    }}>
+      {title && (
+        <div style={{fontWeight:700,fontSize:13,color:"#1E293B",marginBottom:4}}>
+          {title}
+        </div>
+      )}
+      {note && (
+        <div style={{fontSize:10.5,color:"#94A3B8",marginBottom:12}}>{note}</div>
+      )}
+
+      {/* BAR CHART */}
+      {(type==="bar" || type==="bar_grouped") && (
+        <ResponsiveContainer width="100%" height={H}>
+          <BarChart data={data} margin={{top:4,right:16,left:0,bottom:60}}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#F1F5F9"/>
+            <XAxis dataKey={xKey} tick={{fontSize:10,fill:"#64748B"}}
+              angle={-35} textAnchor="end" interval={0}/>
+            <YAxis tick={{fontSize:10,fill:"#64748B"}}
+              tickFormatter={function(v){return fmt(v);}}/>
+            <Tooltip content={tip}/>
+            {yKeys && yKeys.length > 1
+              ? yKeys.map(function(k,i){
+                  return <Bar key={k} dataKey={k} fill={CHART_COLORS[i%CHART_COLORS.length]}
+                    radius={[4,4,0,0]} name={k}/>;
+                })
+              : <Bar dataKey={yKey||"value"} radius={[4,4,0,0]}
+                  name={yKey||"value"}>
+                  {data.map(function(_,i){
+                    return <Cell key={i} fill={CHART_COLORS[i%CHART_COLORS.length]}/>;
+                  })}
+                </Bar>
+            }
+            {yKeys && yKeys.length > 1 && <Legend wrapperStyle={{fontSize:11}}/>}
+          </BarChart>
+        </ResponsiveContainer>
+      )}
+
+      {/* LINE CHART */}
+      {type==="line" && (
+        <ResponsiveContainer width="100%" height={H}>
+          <LineChart data={data} margin={{top:4,right:16,left:0,bottom:20}}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#F1F5F9"/>
+            <XAxis dataKey={xKey} tick={{fontSize:10,fill:"#64748B"}}/>
+            <YAxis tick={{fontSize:10,fill:"#64748B"}}
+              tickFormatter={function(v){return fmt(v);}}/>
+            <Tooltip content={tip}/>
+            <Legend wrapperStyle={{fontSize:11}}/>
+            {(yKeys||[yKey||"value"]).map(function(k,i){
+              return <Line key={k} type="monotone" dataKey={k}
+                stroke={CHART_COLORS[i%CHART_COLORS.length]}
+                strokeWidth={2.5} dot={{r:4}} activeDot={{r:6}}
+                name={k}/>;
+            })}
+          </LineChart>
+        </ResponsiveContainer>
+      )}
+
+      {/* PIE / DONUT CHART */}
+      {(type==="pie" || type==="donut") && (
+        <ResponsiveContainer width="100%" height={H}>
+          <PieChart>
+            <Pie
+              data={data}
+              dataKey={yKey||"value"}
+              nameKey={xKey||"name"}
+              cx="50%" cy="50%"
+              innerRadius={type==="donut" ? 60 : 0}
+              outerRadius={100}
+              paddingAngle={2}
+              label={function(e){
+                return e.name+" "+e.value+(unit||"");
+              }}
+              labelLine={true}>
+              {data.map(function(_,i){
+                return <Cell key={i} fill={CHART_COLORS[i%CHART_COLORS.length]}/>;
+              })}
+            </Pie>
+            <Tooltip/>
+          </PieChart>
+        </ResponsiveContainer>
+      )}
+
+      {/* HORIZONTAL BAR */}
+      {type==="hbar" && (
+        <div style={{display:"flex",flexDirection:"column",gap:6,marginTop:4}}>
+          {data.map(function(d,i){
+            const val = d[yKey||"value"];
+            const max = Math.max(...data.map(function(x){return x[yKey||"value"];}));
+            const pct = max ? val/max*100 : 0;
+            return (
+              <div key={i}>
+                <div style={{display:"flex",justifyContent:"space-between",
+                  fontSize:11,marginBottom:3}}>
+                  <span style={{color:"#374151",fontWeight:500}}>{d[xKey||"name"]}</span>
+                  <span style={{color:"#1E293B",fontWeight:700}}>
+                    {unit==="$"?"$":""}{fmt(val)}{unit&&unit!=="$"?unit:""}
+                  </span>
+                </div>
+                <div style={{height:8,background:"#F1F5F9",borderRadius:4,overflow:"hidden"}}>
+                  <div style={{height:"100%",width:pct+"%",
+                    background:CHART_COLORS[i%CHART_COLORS.length],
+                    borderRadius:4,transition:"width .6s ease"}}/>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Parse chart blocks from GPT-4o response text
+// GPT-4o outputs: ```chart {...json...} ```
+function parseChartBlocks(text) {
+  const parts = [];
+  const re = /```chart\s*\n([\s\S]*?)\n```/g;
+  let last = 0, m;
+  while ((m = re.exec(text)) !== null) {
+    if (m.index > last) parts.push({type:"text", content: text.slice(last, m.index)});
+    try {
+      const spec = JSON.parse(m[1].trim());
+      parts.push({type:"chart", spec});
+    } catch(_) {
+      parts.push({type:"text", content: m[0]});
+    }
+    last = m.index + m[0].length;
+  }
+  if (last < text.length) parts.push({type:"text", content: text.slice(last)});
+  return parts.length > 1 || parts[0]?.type==="chart" ? parts : null;
+}
+
+// Enhanced Bubble for report panel — renders charts inline
+function ReportBubble({msg, accent}) {
+  const isU = msg.role==="user";
+  if (isU) return (
+    <div style={{display:"flex",justifyContent:"flex-end",marginBottom:4}}>
+      <div style={{background:accent,color:"#fff",padding:"7px 12px",
+        borderRadius:"12px 2px 12px 12px",fontSize:12.5,maxWidth:"80%",lineHeight:1.55}}>
+        {msg.content}
+      </div>
+    </div>
+  );
+
+  const parts = parseChartBlocks(msg.content||"");
+
+  return (
+    <div style={{marginBottom:8}}>
+      {msg.tools && msg.tools.map(function(t,i){
+        return <Chip key={i} name={t.name} result={t.result}/>;
+      })}
+      {parts ? (
+        parts.map(function(p,i){
+          if (p.type==="chart") return <ChartBlock key={i} spec={p.spec}/>;
+          return (
+            <div key={i} style={{fontSize:12.5,lineHeight:1.7,color:"#1E293B",
+              background:msg.loading?"transparent":"#F8FAFC",
+              border:msg.loading?"none":"1px solid #E2E8F0",
+              borderRadius:"2px 12px 12px 12px",padding:msg.loading?"0":"10px 14px"}}>
+              {msg.loading
+                ? <span style={{color:"#94A3B8",display:"flex",alignItems:"center",gap:5}}>
+                    <Dots/>Thinking...
+                  </span>
+                : <div dangerouslySetInnerHTML={{__html:mdHtml(p.content)}}/>
+              }
+            </div>
+          );
+        })
+      ) : (
+        <div style={{fontSize:12.5,lineHeight:1.7,color:"#1E293B",
+          background:msg.loading?"transparent":"#F8FAFC",
+          border:msg.loading?"none":"1px solid #E2E8F0",
+          borderRadius:"2px 12px 12px 12px",padding:msg.loading?"0":"10px 14px"}}>
+          {msg.loading
+            ? <span style={{color:"#94A3B8",display:"flex",alignItems:"center",gap:5}}>
+                <Dots/>Building report...
+              </span>
+            : <div dangerouslySetInnerHTML={{__html:mdHtml(msg.content||"")}}/>
+          }
+        </div>
+      )}
+    </div>
+  );
+}
 
 // ─── MULTI-CHAT ENGINE ─────────────────────────────────────────────────────────
 // Manages multiple named chat sessions — shared by GenieAI and Custom Reports
@@ -1161,6 +1544,7 @@ function QueriesPanel({payor}) {
     +"- Plan comparison → query_plan_comparison\n"
     +"- Dental benefits → query_dental_comparison\n\n"
     +"\n\n# MIPI POWER HOUSE — PY2026 MEDICARE ADVANTAGE COMPLETE REFERENCE\nSource: CMS PY2026 Landscape | Stars | Enrollment (Mar 2026) | TPV | Plan Benefits\nMarkets: California | Florida | Texas | PY2026\n\n## NATIONAL OVERVIEW\n- **1,431 unique MA plans** across CA, FL, TX in PY2026\n- **1,138 zero-premium plans** (79.5% of all plans)\n- **Avg star rating: 4.04** | 4+ stars: 940 plans (65.7%)\n- **5-star plans: 121** | 4.5-star: 442 | 4-star: 377\n- **SNP plans: 566** (D-SNP: 313, C-SNP: 225, I-SNP: 28)\n- **Plan types:** HMO 947 (66%) | HMO-POS 234 (16%) | Local PPO 181 (13%) | Regional PPO 10 | Other 59\n- **Total payors: 49**\n\n## STATE SUMMARY TABLE\n| State | Plans | Zero-Prem% | Avg Stars | 4+Star% | SNP | Avg Premium | Avg MOOP |\n|---|---|---|---|---|---|---|---|\n| California | 402 | 73% | 3.66 | 50% | 130 | $13.5/mo | $4,167 |\n| Florida | 611 | 83% | 4.34 | 82% | 286 | $3.5/mo | $4,627 |\n| Texas | 418 | 80% | 3.94 | 56% | 150 | $6.4/mo | $6,322 |\n\n## CALIFORNIA — DETAILED PAYOR BREAKDOWN\n| Rank | Payor | Plans | Zero-Prem | Avg Stars | HMO | PPO | D-SNP | C-SNP |\n|---|---|---|---|---|---|---|---|---|\n| 1 | SCAN Group | 54 | 83% | 4.00 | 54 | 0 | 2 | 12 |\n| 2 | Kaiser Foundation Health Plan, Inc. | 48 | 54% | 4.32 | 48 | 0 | 17 | 0 |\n| 3 | Elevance Health, Inc. | 44 | 100% | 2.97 | 41 | 3 | 6 | 11 |\n| 4 | UnitedHealth Group, Inc. | 43 | 53% | 3.99 | 42 | 1 | 0 | 11 |\n| 5 | Alignment Healthcare USA, LLC | 40 | 60% | 4.00 | 34 | 6 | 1 | 10 |\n| 6 | CVS Health Corporation | 32 | 69% | 3.47 | 22 | 10 | 0 | 0 |\n| 7 | Humana Inc. | 27 | 74% | 3.19 | 17 | 10 | 1 | 0 |\n| 8 | Molina Healthcare, Inc. | 24 | 100% | 3.00 | 24 | 0 | 7 | 8 |\n| 9 | Centene Corporation | 16 | 62% | 3.50 | 16 | 0 | 3 | 2 |\n| 10 | California Physicians' Service | 15 | 73% | 3.90 | 15 | 0 | 1 | 0 |\n\n## FLORIDA — DETAILED PAYOR BREAKDOWN\n| Rank | Payor | Plans | Zero-Prem | Avg Stars | HMO | PPO | D-SNP | C-SNP |\n|---|---|---|---|---|---|---|---|---|\n| 1 | Humana Inc. | 121 | 93% | 4.33 | 94 | 27 | 22 | 29 |\n| 2 | Elevance Health, Inc. | 103 | 95% | 4.50 | 103 | 0 | 36 | 25 |\n| 3 | Devoted Health, Inc. | 84 | 64% | 4.98 | 80 | 4 | 23 | 16 |\n| 4 | UnitedHealth Group, Inc. | 69 | 75% | 4.35 | 49 | 20 | 17 | 7 |\n| 5 | CVS Health Corporation | 66 | 89% | 4.50 | 45 | 21 | 25 | 7 |\n| 6 | Guidewell Mutual Holding Corporation | 36 | 86% | 3.82 | 19 | 17 | 0 | 0 |\n| 7 | Centene Corporation | 25 | 96% | 4.00 | 25 | 0 | 9 | 0 |\n| 8 | Athena Healthcare Holdings, LLC | 24 | 75% | 3.50 | 24 | 0 | 6 | 12 |\n| 9 | Health Care Service Corporation | 16 | 62% | 3.50 | 16 | 0 | 10 | 0 |\n| 10 | Ultimate Healthcare Holdings, LLC | 16 | 94% | 4.00 | 16 | 0 | 2 | 9 |\n\n## TEXAS — DETAILED PAYOR BREAKDOWN\n| Rank | Payor | Plans | Zero-Prem | Avg Stars | HMO | PPO | D-SNP | C-SNP |\n|---|---|---|---|---|---|---|---|---|\n| 1 | UnitedHealth Group, Inc. | 85 | 88% | 4.18 | 63 | 22 | 18 | 9 |\n| 2 | Humana Inc. | 71 | 82% | 3.77 | 36 | 33 | 6 | 5 |\n| 3 | Health Care Service Corporation | 50 | 88% | 3.50 | 36 | 14 | 8 | 1 |\n| 4 | CVS Health Corporation | 44 | 75% | 3.78 | 22 | 22 | 10 | 3 |\n| 5 | Centene Corporation | 38 | 89% | 3.78 | 36 | 2 | 16 | 0 |\n| 6 | Devoted Health, Inc. | 31 | 48% | 4.90 | 29 | 2 | 8 | 9 |\n| 7 | Elevance Health, Inc. | 25 | 80% | 3.50 | 25 | 0 | 17 | 5 |\n| 8 | Baylor Scott & White Health | 14 | 50% | 4.00 | 10 | 4 | 0 | 0 |\n| 9 | Universal Health Services, Inc. | 13 | 92% | 4.50 | 13 | 0 | 2 | 3 |\n| 10 | Molina Healthcare, Inc. | 7 | 100% | 3.50 | 7 | 0 | 7 | 0 |\n\n## ENROLLMENT (March 2026)\n\n### California — Total Enrollment: 2,937,813\n| Rank | Payor | Members | Market Share |\n|---|---|---|---|\n| 1 | Kaiser Foundation Health Plan, Inc. | 1,060,904 | 36.1% |\n| 2 | SCAN Group | 411,482 | 14.0% |\n| 3 | UnitedHealth Group, Inc. | 249,098 | 8.5% |\n| 4 | Alignment Healthcare USA, LLC | 225,701 | 7.7% |\n| 5 | Elevance Health, Inc. | 217,299 | 7.4% |\n| 6 | Humana Inc. | 142,944 | 4.9% |\n| 7 | Centene Corporation | 84,352 | 2.9% |\n| 8 | California Physicians' Service | 77,849 | 2.6% |\n\n### Florida — Total Enrollment: 2,787,314\n| Rank | Payor | Members | Market Share |\n|---|---|---|---|\n| 1 | Humana Inc. | 1,125,249 | 40.4% |\n| 2 | UnitedHealth Group, Inc. | 801,327 | 28.7% |\n| 3 | Elevance Health, Inc. | 273,952 | 9.8% |\n| 4 | CVS Health Corporation | 178,623 | 6.4% |\n| 5 | Guidewell Mutual Holding Corporation | 122,054 | 4.4% |\n| 6 | Centene Corporation | 49,921 | 1.8% |\n| 7 | Devoted Health, Inc. | 49,180 | 1.8% |\n| 8 | LMC Family Holdings, LLC | 39,827 | 1.4% |\n\n### Texas — Total Enrollment: 0\n| Rank | Payor | Members | Market Share |\n|---|---|---|---|\n\n## TOTAL PLAN VALUE (TPV) PY2026\n- **California:** 402 plans | Avg TPV $493 | Max $1,888 | Min $160\n- **Florida:** 611 plans | Avg TPV $595 | Max $1,025 | Min $129\n- **Texas:** 418 plans | Avg TPV $503 | Max $1,037 | Min $120\n\n## STAR RATINGS PY2026 — CONTRACT LEVEL\n| Stars | Contracts |\n|---|---|\n| 5⭐ | 7 |\n| 4.5⭐ | 29 |\n| 4⭐ | 36 |\n| 3.5⭐ | 55 |\n| 3⭐ | 37 |\n| 2.5⭐ | 10 |\n\n### 5-Star Plans (7 total)\n| Contract | Plan Name | Payor | State |\n|---|---|---|---|\n| H1290 | DEVOTED DUAL 039 FL (HMO D-SNP) | Devoted Health, Inc. | Florida |\n| H5652 | Erickson Advantage Signature (HMO-POS) | UnitedHealth Group, Inc. | Florida |\n| H4286 | Leon MediExtra (HMO) | LMC Family Holdings, LLC | Florida |\n| H3362 | Independent Health's Encompass 65 (HMO) | Independent Health Association, Inc. | New York |\n| H6988 | Anthem HealthPlus Full Dual Advantage LTSS 2 (HMO D-SNP) | Elevance Health, Inc. | New York |\n| H5015 | Texas Independence Health Plan, Inc. (HMO I-SNP) | Regency ISNP Holdings LLC | Texas |\n| H7993 | DEVOTED CORE 003 TX (HMO) | Devoted Health, Inc. | Texas |\n\n## KEY BENEFIT BENCHMARKS (PC Benefits PY2026)\n- OTC: data not available\n- Comprehensive dental: data varies\n- Preventive dental: data varies\n\n### MOOP by State (Plans_PC)\n| State | Avg MOOP | Min | Max |\n|---|---|---|---|\n| California | $4,508 | $199 | $9,250 |\n| Florida | $5,664 | $500 | $9,250 |\n| Texas | $7,229 | $999 | $9,250 |\n\n## ANSWER GUIDE\n- For plan count questions → use Section 2 STATE SUMMARY TABLE\n- For payor market share → use Section 3 payor breakdown tables\n- For enrollment/members → use Section 4\n- For star ratings → use Section 6\n- For benefit comparisons → use Section 7\n- For TPV questions → use Section 5\n- Always cite: 'Source: CMS PY2026 Landscape File'\n- If asked about states outside CA/FL/TX, say: 'Our PY2026 data covers California, Florida, and Texas only.'\n\n"
+    +"\n\n## HEALTHWORKSAI BUSINESS LOGIC — FOLLOW STRICTLY\n1. Plan = Bid_id: interchangeable in user inputs (e.g. H0504_041_0).\n2. Landscape unique at State-County-BidID level. Never double-count plans.\n3. Bonus rates & Benchmark: unique at State-County level only.\n4. Star rating: at CONTRACT_ID level — one rating per contract covers all its plans.\n5. Benefits (premium, deductible, MOOP, copay): unique at Plan/Bid_id level.\n6. Eligibles (including D-SNP eligible): unique at State-County level.\n7. Enrollment: if no month specified → use latest available (March 2026).\n8. ALWAYS use HWAI_Enrollment for member counts. IGNORE enrollment in Stars_Landscape.\n9. Enrollment granularity: State-County-CPID-Year-Month in HWAI_Enrollment.\n10. TEG Plan Value = True Plan Value = TPV — same metric. At State-County-BidID level.\n11. Plans_PC = Plan Comparison Page 1 data. PC_Benefits = Plan Comparison Page 2 data.\n12. Stars_Measure: measure weightage unique at Measure/Domain level. Measure stars at Contract-Measure level. Columns A/B/C/D = 1st/2nd/3rd/4th cutpoints.\n13. AEP Growth 2026 = Jan 2026 enrollment MINUS Dec 2025 enrollment. Winning plans = highest AEP growth.\n14. For competitive analysis: combine plan counts (Landscape) + enrollment share (HWAI_Enrollment) + star ratings.\n15. For market share: use enrollment numbers, NOT plan counts.\n"
     +GUARDRAILS;
 
   const welcome = "Welcome, **"+payor.label+"** team! Ask me anything about MA plans, premiums, benefits, or stars.";
@@ -1293,7 +1677,7 @@ function ReportChatInstance({session, payor, sys, onMsgsChange}) {
       {/* Messages */}
       <div style={{flex:1,overflowY:"auto",padding:"16px 20px",
         display:"flex",flexDirection:"column",gap:10}}>
-        {msgs.map(function(m){ return <Bubble key={m.id} msg={m} accent="#0891B2"/>; })}
+        {msgs.map(function(m){ return <ReportBubble key={m.id} msg={m} accent="#0891B2"/>; })}
         {err && (
           <div style={{background:"#FEF2F2",border:"1px solid #FECACA",
             borderRadius:8,padding:"8px 12px",color:"#B91C1C",fontSize:12,
@@ -1320,12 +1704,32 @@ function ReportChatInstance({session, payor, sys, onMsgsChange}) {
 function ReportingPanel({payor}) {
   const ACCENT  = "#0891B2";
   const sys     = "You are MIPI POWER HOUSE - HealthWorksAI MA intelligence for "
-    +payor.label+". Generate well-structured markdown reports. "
+    +payor.label+". Generate well-structured markdown reports WITH CHARTS. "
     +"KEY DOMAIN RULE: A Medicare Advantage plan is uniquely identified by its Bid_id "
     +"(format CONTRACT_ID_PLAN_ID_SEGMENT e.g. H0504_041_0). "
-    +"Generate reports with executive summary, data tables, key findings, strategic recommendations. "
+    +"Generate reports with executive summary, data tables, key findings, strategic recommendations, AND visualizations.\n\n"
+    +"## CHART GENERATION RULES\n"
+    +"When data can be visualized, embed chart specs using this EXACT format between text:\n"
+    +"\`\`\`chart\n{JSON spec}\n\`\`\`\n\n"
+    +"Chart spec schema:\n"
+    +"{ type: 'bar'|'line'|'pie'|'donut'|'hbar'|'bar_grouped', title: string, data: [...], xKey: string, yKey: string, yKeys?: string[], unit?: '$'|'%'|'', note?: string }\n\n"
+    +"WHEN TO USE EACH CHART TYPE:\n"
+    +"- bar: comparing plans/payors by one metric (e.g. plan counts, zero-prem% by payor)\n"
+    +"- hbar: ranking list where labels are long (e.g. top payors by enrollment)\n"
+    +"- line: trends over time (AEP growth, enrollment trends month-over-month)\n"
+    +"- pie/donut: market share, distribution (plan type mix, payor share)\n"
+    +"- bar_grouped: comparing 2-3 metrics side by side across payors/states\n\n"
+    +"CHART DATA RULES:\n"
+    +"- Always use real numbers from the embedded data — never invented values\n"
+    +"- Keep data arrays to max 10 items for readability\n"
+    +"- Use short labels in xKey values (abbreviate if needed)\n"
+    +"- For % values use numbers like 83 not '83%'\n"
+    +"- For $ values set unit: '$'\n\n"
+    +"ALWAYS include at least 1-2 charts per report. Place charts right after the relevant section.\n\n"
+    +"Example: after writing about FL payor plan counts, embed a bar chart of top 8 payors.\n"
     +"Always cite: CMS PY2026 Landscape File.\n\n"
     +"\n\n## YOUR DATA SOURCE — USE THIS EXCLUSIVELY\nThe following tables contain the REAL PY2026 CMS Landscape data for CA, FL, TX.\nAnswer ALL questions from this data. Do NOT call tools for these facts.\nDo NOT say 'I don't have data' — the data is right here.\n\n## MIPI POWER HOUSE — PY2026 MEDICARE ADVANTAGE DATA (CA + FL + TX)\nSource: CMS Landscape File PY2026 | 1,431 unique plans across 3 states\n\n### NATIONAL SUMMARY\n| Metric | Value |\n|---|---|\n| Total unique MA plans (CA+FL+TX) | 1,431 |\n| States covered | California, Florida, Texas |\n| Zero-premium plans | 1,138 (79.5%) |\n| 4+ star plans | 938 (65.5%) |\n| 5-star plans | 121 (8.5%) |\n| Avg star rating | 4.02 |\n| Total unique payors | 49 |\n\n### STATE SUMMARY\n| State | Unique Plans | Zero-Prem% | Avg Stars | 4+Star% | SNP Plans | Avg Monthly Premium | Avg MOOP |\n|---|---|---|---|---|---|---|---|\n| California | 402 | 73% | 3.66 | 50% | 130 | $13.5 | $4,167 |\n| Florida | 611 | 83% | 4.34 | 82% | 286 | $3.5 | $4,627 |\n| Texas | 418 | 80% | 3.94 | 56% | 150 | $6.4 | $6,322 |\n\n### CALIFORNIA — TOP PAYORS\n| Payor | Plans | Zero-Prem | Avg Stars | HMO | PPO | D-SNP |\n|---|---|---|---|---|---|---|\n| SCAN Group | 54 | 83% | 4.0 | 54 | 0 | 2 |\n| Kaiser Foundation Health Plan, Inc. | 48 | 54% | 4.32 | 48 | 0 | 17 |\n| Elevance Health, Inc. | 44 | 100% | 2.97 | 41 | 3 | 6 |\n| UnitedHealth Group, Inc. | 43 | 53% | 3.99 | 42 | 1 | 0 |\n| Alignment Healthcare USA, LLC | 40 | 60% | 4.0 | 34 | 6 | 1 |\n| CVS Health Corporation | 32 | 68% | 3.47 | 22 | 10 | 0 |\n| Humana Inc. | 27 | 74% | 3.19 | 17 | 10 | 1 |\n| Molina Healthcare, Inc. | 24 | 100% | 3.0 | 24 | 0 | 7 |\n| Centene Corporation | 16 | 62% | 3.5 | 16 | 0 | 3 |\n| California Physicians' Service | 15 | 73% | 3.9 | 15 | 0 | 1 |\n\n### FLORIDA — TOP PAYORS\n| Payor | Plans | Zero-Prem | Avg Stars | HMO | PPO | D-SNP |\n|---|---|---|---|---|---|---|\n| Humana Inc. | 121 | 92% | 4.33 | 94 | 27 | 22 |\n| Elevance Health, Inc. | 103 | 95% | 4.5 | 103 | 0 | 36 |\n| Devoted Health, Inc. | 84 | 64% | 4.98 | 80 | 4 | 23 |\n| UnitedHealth Group, Inc. | 69 | 75% | 4.35 | 49 | 20 | 17 |\n| CVS Health Corporation | 66 | 89% | 4.5 | 45 | 21 | 25 |\n| Guidewell Mutual Holding Corporation | 36 | 86% | 3.82 | 19 | 17 | 0 |\n| Centene Corporation | 25 | 96% | 4.0 | 25 | 0 | 9 |\n| Athena Healthcare Holdings, LLC | 24 | 75% | 3.5 | 24 | 0 | 6 |\n| Health Care Service Corporation | 16 | 62% | 3.5 | 16 | 0 | 10 |\n| Ultimate Healthcare Holdings, LLC | 16 | 93% | 4.0 | 16 | 0 | 2 |\n\n### TEXAS — TOP PAYORS\n| Payor | Plans | Zero-Prem | Avg Stars | HMO | PPO | D-SNP |\n|---|---|---|---|---|---|---|\n| UnitedHealth Group, Inc. | 85 | 88% | 4.18 | 63 | 22 | 18 |\n| Humana Inc. | 71 | 81% | 3.77 | 36 | 33 | 6 |\n| Health Care Service Corporation | 50 | 88% | 3.5 | 36 | 14 | 8 |\n| CVS Health Corporation | 44 | 75% | 3.78 | 22 | 22 | 10 |\n| Centene Corporation | 38 | 89% | 3.78 | 36 | 2 | 16 |\n| Devoted Health, Inc. | 31 | 48% | 4.9 | 29 | 2 | 8 |\n| Elevance Health, Inc. | 25 | 80% | 3.5 | 25 | 0 | 17 |\n| Baylor Scott & White Health | 14 | 50% | 4.0 | 10 | 4 | 0 |\n| Universal Health Services, Inc. | 13 | 92% | 4.5 | 13 | 0 | 2 |\n| Molina Healthcare, Inc. | 7 | 100% | 3.5 | 7 | 0 | 7 |\n\n### SNP BREAKDOWN (CA+FL+TX)\n| Type | Count |\n|---|---|\n| Non-SNP | 865 |\n| Dual-Eligible (D-SNP) | 313 |\n| Chronic/Disabling (C-SNP) | 225 |\n| Institutional (I-SNP) | 28 |\n\n### PLAN TYPE BREAKDOWN\n| Type | Count | % |\n|---|---|---|\n| HMO | 947 | 66% |\n| HMO-POS | 234 | 16% |\n| Local PPO | 181 | 13% |\n| Regional PPO | 10 | 1% |\n| Other | 59 | 4% |\n\n### PREMIUM DETAIL BY STATE\n| State | Avg Premium (all) | Avg Premium (non-zero) | Max Premium |\n|---|---|---|---|\n| California | $13.5/mo | $50.9/mo | $366/mo |\n| Florida | $3.5/mo | $20.7/mo | $184/mo |\n| Texas | $6.4/mo | $32.7/mo | $255/mo |\n\n## ANSWER RULES\n1. Answer from the tables above — cite the exact numbers.\n2. If asked about a state not in this data, say only CA/FL/TX are available.\n3. For payor comparisons, use the per-state payor tables.\n4. Always mention the source: CMS PY2026 Landscape File.\n"
+    +"\n\n## HEALTHWORKSAI BUSINESS LOGIC — FOLLOW STRICTLY\n1. Plan = Bid_id: interchangeable in user inputs (e.g. H0504_041_0).\n2. Landscape unique at State-County-BidID level. Never double-count plans.\n3. Bonus rates & Benchmark: unique at State-County level only.\n4. Star rating: at CONTRACT_ID level — one rating per contract covers all its plans.\n5. Benefits (premium, deductible, MOOP, copay): unique at Plan/Bid_id level.\n6. Eligibles (including D-SNP eligible): unique at State-County level.\n7. Enrollment: if no month specified → use latest available (March 2026).\n8. ALWAYS use HWAI_Enrollment for member counts. IGNORE enrollment in Stars_Landscape.\n9. TEG Plan Value = True Plan Value = TPV — same metric.\n10. Plans_PC = Page 1. PC_Benefits = Page 2 of Plan Comparison.\n11. AEP Growth 2026 = Jan 2026 enrollment MINUS Dec 2025 enrollment. Winning plans = highest AEP growth.\n12. Market share = use enrollment numbers. Competitive analysis = plan counts + enrollment + stars.\n"
     +GUARDRAILS;
 
   const welcome = "Ready to build reports for **"+payor.label
@@ -2082,6 +2486,7 @@ function Copilot({payor, db, planCtx, sendRef}) {
     +"PY2026: 15,955 plans across CA/FL/TX, 72.5% zero-premium, avg star 3.81. "
     +"Be concise. Call tools. Cite sources. Offer 1-2 follow-ups.\n\n"
     +"\n\n# MIPI POWER HOUSE — PY2026 MEDICARE ADVANTAGE COMPLETE REFERENCE\nSource: CMS PY2026 Landscape | Stars | Enrollment (Mar 2026) | TPV | Plan Benefits\nMarkets: California | Florida | Texas | PY2026\n\n## NATIONAL OVERVIEW\n- **1,431 unique MA plans** across CA, FL, TX in PY2026\n- **1,138 zero-premium plans** (79.5% of all plans)\n- **Avg star rating: 4.04** | 4+ stars: 940 plans (65.7%)\n- **5-star plans: 121** | 4.5-star: 442 | 4-star: 377\n- **SNP plans: 566** (D-SNP: 313, C-SNP: 225, I-SNP: 28)\n- **Plan types:** HMO 947 (66%) | HMO-POS 234 (16%) | Local PPO 181 (13%) | Regional PPO 10 | Other 59\n- **Total payors: 49**\n\n## STATE SUMMARY TABLE\n| State | Plans | Zero-Prem% | Avg Stars | 4+Star% | SNP | Avg Premium | Avg MOOP |\n|---|---|---|---|---|---|---|---|\n| California | 402 | 73% | 3.66 | 50% | 130 | $13.5/mo | $4,167 |\n| Florida | 611 | 83% | 4.34 | 82% | 286 | $3.5/mo | $4,627 |\n| Texas | 418 | 80% | 3.94 | 56% | 150 | $6.4/mo | $6,322 |\n\n## CALIFORNIA — DETAILED PAYOR BREAKDOWN\n| Rank | Payor | Plans | Zero-Prem | Avg Stars | HMO | PPO | D-SNP | C-SNP |\n|---|---|---|---|---|---|---|---|---|\n| 1 | SCAN Group | 54 | 83% | 4.00 | 54 | 0 | 2 | 12 |\n| 2 | Kaiser Foundation Health Plan, Inc. | 48 | 54% | 4.32 | 48 | 0 | 17 | 0 |\n| 3 | Elevance Health, Inc. | 44 | 100% | 2.97 | 41 | 3 | 6 | 11 |\n| 4 | UnitedHealth Group, Inc. | 43 | 53% | 3.99 | 42 | 1 | 0 | 11 |\n| 5 | Alignment Healthcare USA, LLC | 40 | 60% | 4.00 | 34 | 6 | 1 | 10 |\n| 6 | CVS Health Corporation | 32 | 69% | 3.47 | 22 | 10 | 0 | 0 |\n| 7 | Humana Inc. | 27 | 74% | 3.19 | 17 | 10 | 1 | 0 |\n| 8 | Molina Healthcare, Inc. | 24 | 100% | 3.00 | 24 | 0 | 7 | 8 |\n| 9 | Centene Corporation | 16 | 62% | 3.50 | 16 | 0 | 3 | 2 |\n| 10 | California Physicians' Service | 15 | 73% | 3.90 | 15 | 0 | 1 | 0 |\n\n## FLORIDA — DETAILED PAYOR BREAKDOWN\n| Rank | Payor | Plans | Zero-Prem | Avg Stars | HMO | PPO | D-SNP | C-SNP |\n|---|---|---|---|---|---|---|---|---|\n| 1 | Humana Inc. | 121 | 93% | 4.33 | 94 | 27 | 22 | 29 |\n| 2 | Elevance Health, Inc. | 103 | 95% | 4.50 | 103 | 0 | 36 | 25 |\n| 3 | Devoted Health, Inc. | 84 | 64% | 4.98 | 80 | 4 | 23 | 16 |\n| 4 | UnitedHealth Group, Inc. | 69 | 75% | 4.35 | 49 | 20 | 17 | 7 |\n| 5 | CVS Health Corporation | 66 | 89% | 4.50 | 45 | 21 | 25 | 7 |\n| 6 | Guidewell Mutual Holding Corporation | 36 | 86% | 3.82 | 19 | 17 | 0 | 0 |\n| 7 | Centene Corporation | 25 | 96% | 4.00 | 25 | 0 | 9 | 0 |\n| 8 | Athena Healthcare Holdings, LLC | 24 | 75% | 3.50 | 24 | 0 | 6 | 12 |\n| 9 | Health Care Service Corporation | 16 | 62% | 3.50 | 16 | 0 | 10 | 0 |\n| 10 | Ultimate Healthcare Holdings, LLC | 16 | 94% | 4.00 | 16 | 0 | 2 | 9 |\n\n## TEXAS — DETAILED PAYOR BREAKDOWN\n| Rank | Payor | Plans | Zero-Prem | Avg Stars | HMO | PPO | D-SNP | C-SNP |\n|---|---|---|---|---|---|---|---|---|\n| 1 | UnitedHealth Group, Inc. | 85 | 88% | 4.18 | 63 | 22 | 18 | 9 |\n| 2 | Humana Inc. | 71 | 82% | 3.77 | 36 | 33 | 6 | 5 |\n| 3 | Health Care Service Corporation | 50 | 88% | 3.50 | 36 | 14 | 8 | 1 |\n| 4 | CVS Health Corporation | 44 | 75% | 3.78 | 22 | 22 | 10 | 3 |\n| 5 | Centene Corporation | 38 | 89% | 3.78 | 36 | 2 | 16 | 0 |\n| 6 | Devoted Health, Inc. | 31 | 48% | 4.90 | 29 | 2 | 8 | 9 |\n| 7 | Elevance Health, Inc. | 25 | 80% | 3.50 | 25 | 0 | 17 | 5 |\n| 8 | Baylor Scott & White Health | 14 | 50% | 4.00 | 10 | 4 | 0 | 0 |\n| 9 | Universal Health Services, Inc. | 13 | 92% | 4.50 | 13 | 0 | 2 | 3 |\n| 10 | Molina Healthcare, Inc. | 7 | 100% | 3.50 | 7 | 0 | 7 | 0 |\n\n## ENROLLMENT (March 2026)\n\n### California — Total Enrollment: 2,937,813\n| Rank | Payor | Members | Market Share |\n|---|---|---|---|\n| 1 | Kaiser Foundation Health Plan, Inc. | 1,060,904 | 36.1% |\n| 2 | SCAN Group | 411,482 | 14.0% |\n| 3 | UnitedHealth Group, Inc. | 249,098 | 8.5% |\n| 4 | Alignment Healthcare USA, LLC | 225,701 | 7.7% |\n| 5 | Elevance Health, Inc. | 217,299 | 7.4% |\n| 6 | Humana Inc. | 142,944 | 4.9% |\n| 7 | Centene Corporation | 84,352 | 2.9% |\n| 8 | California Physicians' Service | 77,849 | 2.6% |\n\n### Florida — Total Enrollment: 2,787,314\n| Rank | Payor | Members | Market Share |\n|---|---|---|---|\n| 1 | Humana Inc. | 1,125,249 | 40.4% |\n| 2 | UnitedHealth Group, Inc. | 801,327 | 28.7% |\n| 3 | Elevance Health, Inc. | 273,952 | 9.8% |\n| 4 | CVS Health Corporation | 178,623 | 6.4% |\n| 5 | Guidewell Mutual Holding Corporation | 122,054 | 4.4% |\n| 6 | Centene Corporation | 49,921 | 1.8% |\n| 7 | Devoted Health, Inc. | 49,180 | 1.8% |\n| 8 | LMC Family Holdings, LLC | 39,827 | 1.4% |\n\n### Texas — Total Enrollment: 0\n| Rank | Payor | Members | Market Share |\n|---|---|---|---|\n\n## TOTAL PLAN VALUE (TPV) PY2026\n- **California:** 402 plans | Avg TPV $493 | Max $1,888 | Min $160\n- **Florida:** 611 plans | Avg TPV $595 | Max $1,025 | Min $129\n- **Texas:** 418 plans | Avg TPV $503 | Max $1,037 | Min $120\n\n## STAR RATINGS PY2026 — CONTRACT LEVEL\n| Stars | Contracts |\n|---|---|\n| 5⭐ | 7 |\n| 4.5⭐ | 29 |\n| 4⭐ | 36 |\n| 3.5⭐ | 55 |\n| 3⭐ | 37 |\n| 2.5⭐ | 10 |\n\n### 5-Star Plans (7 total)\n| Contract | Plan Name | Payor | State |\n|---|---|---|---|\n| H1290 | DEVOTED DUAL 039 FL (HMO D-SNP) | Devoted Health, Inc. | Florida |\n| H5652 | Erickson Advantage Signature (HMO-POS) | UnitedHealth Group, Inc. | Florida |\n| H4286 | Leon MediExtra (HMO) | LMC Family Holdings, LLC | Florida |\n| H3362 | Independent Health's Encompass 65 (HMO) | Independent Health Association, Inc. | New York |\n| H6988 | Anthem HealthPlus Full Dual Advantage LTSS 2 (HMO D-SNP) | Elevance Health, Inc. | New York |\n| H5015 | Texas Independence Health Plan, Inc. (HMO I-SNP) | Regency ISNP Holdings LLC | Texas |\n| H7993 | DEVOTED CORE 003 TX (HMO) | Devoted Health, Inc. | Texas |\n\n## KEY BENEFIT BENCHMARKS (PC Benefits PY2026)\n- OTC: data not available\n- Comprehensive dental: data varies\n- Preventive dental: data varies\n\n### MOOP by State (Plans_PC)\n| State | Avg MOOP | Min | Max |\n|---|---|---|---|\n| California | $4,508 | $199 | $9,250 |\n| Florida | $5,664 | $500 | $9,250 |\n| Texas | $7,229 | $999 | $9,250 |\n\n## ANSWER GUIDE\n- For plan count questions → use Section 2 STATE SUMMARY TABLE\n- For payor market share → use Section 3 payor breakdown tables\n- For enrollment/members → use Section 4\n- For star ratings → use Section 6\n- For benefit comparisons → use Section 7\n- For TPV questions → use Section 5\n- Always cite: 'Source: CMS PY2026 Landscape File'\n- If asked about states outside CA/FL/TX, say: 'Our PY2026 data covers California, Florida, and Texas only.'\n\n"
+    +"\n\n## HEALTHWORKSAI BUSINESS LOGIC — FOLLOW STRICTLY\n1. Plan = Bid_id: interchangeable in user inputs (e.g. H0504_041_0).\n2. Landscape unique at State-County-BidID level. Never double-count plans.\n3. Bonus rates & Benchmark: unique at State-County level only.\n4. Star rating: at CONTRACT_ID level — one rating per contract covers all its plans.\n5. Benefits (premium, deductible, MOOP, copay): unique at Plan/Bid_id level.\n6. Eligibles (including D-SNP eligible): unique at State-County level.\n7. Enrollment: if no month specified → use latest available (March 2026).\n8. ALWAYS use HWAI_Enrollment for member counts. IGNORE enrollment in Stars_Landscape.\n9. Enrollment granularity: State-County-CPID-Year-Month in HWAI_Enrollment.\n10. TEG Plan Value = True Plan Value = TPV — same metric. At State-County-BidID level.\n11. Plans_PC = Plan Comparison Page 1 data. PC_Benefits = Plan Comparison Page 2 data.\n12. Stars_Measure: measure weightage unique at Measure/Domain level. Measure stars at Contract-Measure level. Columns A/B/C/D = 1st/2nd/3rd/4th cutpoints.\n13. AEP Growth 2026 = Jan 2026 enrollment MINUS Dec 2025 enrollment. Winning plans = highest AEP growth.\n14. For competitive analysis: combine plan counts (Landscape) + enrollment share (HWAI_Enrollment) + star ratings.\n15. For market share: use enrollment numbers, NOT plan counts.\n"
     +GUARDRAILS;
   const welcome = "I am your **HWAI Copilot** for **"+db.label
     +"**.\n\n"+db.desc+"\n\nPick a question below or ask your own.";
