@@ -68,6 +68,7 @@ async function queryLandscape(db, p) {
 
   let q = db.from("Stars_Landscape").select("*");
   if (stateList && stateList.length) q = q.in("State", stateList);
+  if (p.bid_id)     q = q.eq("Bid_id",                  p.bid_id);  // exact plan lookup
   if (p.county)     q = q.ilike("County",              `%${p.county}%`);
   if (p.parent_org) q = q.ilike("parent_organization", `%${p.parent_org}%`);
   if (p.min_stars)  q = q.gte("Star_Rating",            String(p.min_stars));
