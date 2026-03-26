@@ -1707,6 +1707,43 @@ function Copilot({payor, db, planCtx, sendRef}) {
   const [minimized, setMinimized] = useState(false);
   const [inp, setInp] = useState("");
   const endRef = useRef(null);
+
+  // ── Silent filter context — absorbed from Plan Comparison iframe ────────────
+  // Stored as a ref so it doesn't trigger re-renders
+  const activeFilters = useRef({});
+
+  // When planCtx arrives from iframe postMessage, silently update filters
+  useEffect(function(){
+    if (!planCtx) return;
+    const updated = {};
+    if (planCtx.state)     updated.state     = planCtx.state;
+    if (planCtx.payor)     updated.payor     = planCtx.payor;
+    if (planCtx.plan_type) updated.plan_type = planCtx.plan_type;
+    if (planCtx.county)    updated.county    = planCtx.county;
+    if (planCtx.snp_type)  updated.snp_type  = planCtx.snp_type;
+    if (planCtx.year)      updated.year      = planCtx.year;
+    // Merge into active filters
+    activeFilters.current = Object.assign({}, activeFilters.current, updated);
+    console.log("[Copilot] absorbed filters:", activeFilters.current);
+  }, [planCtx]);
+
+  // Build filter context string — silently injected into every message
+  function buildFilterCtx() {
+    const f     = activeFilters.current;
+    const parts = [];
+    if (f.state)     parts.push("State: "     + f.state);
+    if (f.payor)     parts.push("Payor: "     + f.payor);
+    if (f.plan_type) parts.push("Plan type: " + f.plan_type);
+    if (f.county)    parts.push("County: "    + f.county);
+    if (f.snp_type)  parts.push("SNP type: "  + f.snp_type);
+    if (f.year)      parts.push("Year: PY"    + f.year);
+    return parts.length
+      ? "[Context from Plan Comparison — " + parts.join(" | ") + "]"
+      : "";
+  }
+
+  // Wraps send — silently prepends active filter context to every message
+  // Note: sendWithFilters is defined after useChat so send is available
   const sys = "You are the HWAI Copilot - HealthWorksAI embedded MA intelligence assistant. "
     +"User is a payor professional from "+payor.label+". "
     +"They are viewing the "+db.label+" dashboard. "+db.ctx+" "
@@ -1717,9 +1754,15 @@ function Copilot({payor, db, planCtx, sendRef}) {
     +"**.\n\n"+db.desc+"\n\nPick a question below or ask your own.";
   const {msgs, busy, err, setErr, send} = useChat(sys, welcome);
 
-  // Register send fn with parent so postMessage bridge can auto-prompt
+  // Now send is available — define sendWithFilters here
+  function sendWithFilters(msg) {
+    const ctx = buildFilterCtx();
+    send(ctx ? ctx + "\n\n" + msg : msg);
+  }
+
+  // Register sendWithFilters with parent so postMessage bridge can auto-prompt
   useEffect(function(){
-    if (sendRef) sendRef.current = send;
+    if (sendRef) sendRef.current = sendWithFilters;
     return function(){ if (sendRef) sendRef.current = null; };
   }, [send, sendRef]);
 
@@ -1822,7 +1865,7 @@ function Copilot({payor, db, planCtx, sendRef}) {
         </div>
       </div>
 
-      {/* Plan context banner — shown when iframe sends an event */}
+      {/* Plan context banner — shown when iframe absorbs filters */}
       {planCtx && (
         <div style={{
           padding:"7px 12px",
@@ -1926,7 +1969,7 @@ function Copilot({payor, db, planCtx, sendRef}) {
             <div style={{display:"flex",flexDirection:"column",gap:4}}>
               {db.qs.map(function(qs,i){
                 return (
-                  <button key={i} onClick={function(){send(qs);}}
+                  <button key={i} onClick={function(){sendWithFilters(qs);}}
                     style={{
                       background:"#F8FAFC",
                       border:"1px solid "+db.catColor+"28",
@@ -1957,8 +2000,10 @@ function Copilot({payor, db, planCtx, sendRef}) {
         {/* AI Insights Button */}
         <button
           onClick={function(){
+            const ctx    = buildFilterCtx();
             const prompt =
-              "Generate a concise AI Insights summary for the "
+              (ctx ? ctx + " " : "")
+              + "Generate a concise AI Insights summary for the "
               + db.label + " dashboard. Include: "
               + "1) Key market observations from the latest data, "
               + "2) Top 3 competitive trends worth noting, "
@@ -2017,7 +2062,7 @@ function Copilot({payor, db, planCtx, sendRef}) {
             disabled={busy} rows={1}
             placeholder="Ask about this dashboard..."
             onKeyDown={function(e){
-              if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();send(inp);setInp("");}
+              if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();sendWithFilters(inp);setInp("");}
             }}
             style={{
               flex:1, background:"transparent", border:"none", outline:"none",
@@ -2031,7 +2076,7 @@ function Copilot({payor, db, planCtx, sendRef}) {
             }}
           />
           <button
-            onClick={function(){send(inp);setInp("");}}
+            onClick={function(){sendWithFilters(inp);setInp("");}}
             disabled={busy||!inp.trim()}
             style={{
               background:busy||!inp.trim()?"#E2E8F0":db.catColor,
@@ -2103,25 +2148,36 @@ function DBView({db, payor}) {
       if (msg.type === "filter_changed") {
         ctx = {
           event:     "filter_changed",
-          state:     msg.state     || null,
-          plan_type: msg.plan_type || null,
-          payor:     msg.payor     || null,
-          snp_type:  msg.snp_type  || null,
+          state:     msg.state     || msg.State     || null,
+          plan_type: msg.plan_type || msg.planType  || msg.PlanType || null,
+          payor:     msg.payor     || msg.parentOrg || msg.parent_org || null,
+          snp_type:  msg.snp_type  || msg.snpType   || null,
+          county:    msg.county    || msg.County    || null,
+          year:      msg.year      || msg.Year      || 2026,
         };
-        autoPrompt = "The user filtered the Plan Comparison to: "
-          + Object.entries(ctx)
-              .filter(function([k,v]){ return k !== "event" && v; })
-              .map(function([k,v]){ return k+": "+v; })
-              .join(", ")
-          + ". Summarise what plans match these filters using query_plan_comparison.";
+        // Build human-readable summary of what filters changed
+        const filterDesc = Object.entries(ctx)
+          .filter(function(e){ return e[0]!=="event" && e[0]!=="year" && e[1]; })
+          .map(function(e){ return e[0].replace("_"," ")+": "+e[1]; })
+          .join(", ");
+        autoPrompt = filterDesc
+          ? "The user set Plan Comparison filters: " + filterDesc
+            + " (Year: PY" + ctx.year + "). "
+            + "Using query_landscape_data and query_enrollment_data, "
+            + "give a concise summary: unique plan count, top payors by plan count, "
+            + "avg star rating, and 2 key insights for these filters."
+          : null;
       }
 
       if (msg.type === "state_changed") {
-        ctx = { event:"state_changed", state: msg.state || null };
-        autoPrompt = "The user changed the state filter to "
-          + (msg.state || "unknown")
-          + ". How many MA plans are available in this state? "
-          + "Use query_landscape_data and query_plan_comparison.";
+        const st = msg.state || msg.State || null;
+        ctx = { event:"state_changed", state: st };
+        autoPrompt = st
+          ? "The user changed the Plan Comparison state to " + st + ". "
+            + "Using query_landscape_data, give: "
+            + "unique plan count, top 5 payors by plan count, "
+            + "avg star rating, and % of $0 premium plans in " + st + "."
+          : null;
       }
 
       if (ctx) {

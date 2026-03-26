@@ -34,44 +34,32 @@ if (!OPENAI_KEY) {
 
 const db = createClient(SUPABASE_URL, SUPABASE_KEY, { auth: { persistSession: false } });
 
+// ── Load pdf-parse ────────────────────────────────────────────────────────────
+var pdfParse = require("pdf-parse");
+
 // ── PDF text extractor ───────────────────────────────────────────────────────
-// Extracts readable text from PDF BT/ET blocks, filtering out XML metadata
-function extractTextFromPdf(buffer) {
-  const content = buffer.toString("binary");
-  const lines   = [];
-
-  // 1. Extract text from BT...ET blocks (actual page text)
-  const btEtBlocks = content.match(/BT[\s\S]{1,5000}?ET/g) || [];
-  btEtBlocks.forEach(block => {
-    // Tj operator: (text)Tj
-    const tjMatches = block.match(/\(([^)]{1,300})\)\s*Tj/g) || [];
-    tjMatches.forEach(m => {
-      const text = m.replace(/^\(/, "").replace(/\)\s*Tj$/, "")
-        .replace(/\n/g, "
-").replace(/\r/g, "").trim();
-      if (text.length > 3 && /[a-zA-Z]/.test(text)) lines.push(text);
-    });
-
-    // TJ operator: [(text) spacing (text)] TJ
-    const tjArrays = block.match(/\[([^\]]{1,500})\]\s*TJ/g) || [];
-    tjArrays.forEach(m => {
-      const parts = m.match(/\(([^)]{1,200})\)/g) || [];
-      const text  = parts.map(p => p.slice(1,-1)).join("").trim();
-      if (text.length > 3 && /[a-zA-Z]/.test(text)) lines.push(text);
-    });
-  });
-
-  // 2. Deduplicate adjacent identical lines
-  const deduped = lines.filter((l, i) => i === 0 || l !== lines[i-1]);
-
-  // 3. Join and clean
-  const raw = deduped.join(" ")
-    .replace(/[^ -~
-]/g, " ")  // printable ASCII only
-    .replace(/\s+/g, " ")
-    .trim();
-
-  return raw;
+async function extractTextFromPdf(buffer) {
+  try {
+    var result = await pdfParse(buffer);
+    var text   = result.text || "";
+    // Strip XML/HTML tags that sometimes appear in PDF metadata streams
+    text = text.replace(/<[^>]{1,200}>/g, " ");
+    // Collapse whitespace
+    text = text.replace(/[ \t]+/g, " ").replace(/\n{3,}/g, "\n\n").trim();
+    return { text: text, pages: result.numpages };
+  } catch (e) {
+    // Fallback: manual BT/ET extraction for non-standard PDFs
+    var content = buffer.toString("binary");
+    var lines   = [];
+    var re      = /\(([^)]{2,200})\)\s*Tj/g;
+    var m;
+    while ((m = re.exec(content)) !== null) {
+      var t = m[1].trim();
+      if (/[a-zA-Z]{2,}/.test(t)) lines.push(t);
+    }
+    var raw = lines.join(" ").replace(/[ \t]+/g, " ").trim();
+    return { text: raw, pages: 0 };
+  }
 }
 
 // ── Chunk text ────────────────────────────────────────────────────────────────
@@ -176,11 +164,12 @@ async function processPdf(filename) {
   const docType = filename.toLowerCase().includes("dental") ? "DENTAL" : "EOC";
   console.log(`\n📄  [${docType}] ${filename}`);
 
-  const buffer = await downloadPdf(filename);
+  const buffer   = await downloadPdf(filename);
   console.log(`   Size: ${(buffer.length/1024).toFixed(0)} KB`);
 
-  const text = extractTextFromPdf(buffer);
-  console.log(`   Extracted: ${text.length.toLocaleString()} chars`);
+  const extracted = await extractTextFromPdf(buffer);
+  const text      = extracted.text;
+  console.log(`   Extracted: ${text.length.toLocaleString()} chars | Pages: ${extracted.pages}`);
 
   if (text.length < 100) {
     console.warn("   ⚠️  Very little text — skipping");
