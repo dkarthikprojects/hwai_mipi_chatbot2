@@ -76,47 +76,59 @@ function normaliseState(s) {
 }
 
 async function queryLandscape(db, p) {
-  // Normalise state filters — GPT-4o may pass "Florida" or "FL" or "florida"
   const rawStates = p.states || (p.state ? [p.state] : null);
   const stateList = rawStates ? rawStates.map(normaliseState).filter(Boolean) : null;
+
+  // Step 1: try with state filter
   let q = db.from("Stars_Landscape")
     .select("Bid_id,parent_organization,State,County,Star_Rating,Bench_mark");
-  if (stateList?.length)  q = q.in("State", stateList);
-  if (p.county)           q = q.ilike("County", `%${p.county}%`);
-  if (p.parent_org)       q = q.ilike("parent_organization", `%${p.parent_org}%`);
-  if (p.min_stars)        q = q.gte("Star_Rating", String(p.min_stars));
-  const { data: raw, error, count } = await q.limit(10000);
-  if (error) throw new Error("Stars_Landscape: " + error.message);
+  if (stateList?.length) q = q.in("State", stateList);
+  if (p.county)          q = q.ilike("County", `%${p.county}%`);
+  if (p.parent_org)      q = q.ilike("parent_organization", `%${p.parent_org}%`);
 
-  // Safety check — if no rows at all, return a clear diagnostic
+  const { data: raw, error } = await q.limit(10000);
+  if (error) throw new Error("Stars_Landscape query failed: " + error.message);
+
+  console.log("[Landscape] stateList:", JSON.stringify(stateList),
+    "| raw rows:", raw?.length || 0);
+
+  // Step 2: if filtered query returned nothing, do an unfiltered sample
+  // to see what State values actually exist in the DB
   if (!raw || raw.length === 0) {
+    const { data: sample } = await db.from("Stars_Landscape")
+      .select("Bid_id,State,parent_organization")
+      .limit(5);
+    console.log("[Landscape] unfiltered sample:", JSON.stringify(sample));
+    const sampleStates = [...new Set((sample||[]).map(r => r.State))];
     return {
       unique_plan_count: 0,
       raw_row_count:     0,
-      filters_applied:   { states: stateList, county: p.county||null },
-      diagnostic:        "No rows returned from Stars_Landscape. " +
-        "Check that State column values match filter (e.g. 'FL' not 'Florida').",
+      diagnostic: "Filtered query returned 0 rows. "
+        + "State filter used: " + JSON.stringify(stateList) + ". "
+        + "Sample State values in DB: " + JSON.stringify(sampleStates) + ". "
+        + "If DB stores 'Florida' not 'FL', the filter needs adjustment.",
+      sample_states_in_db: sampleStates,
       source: "Stars_Landscape table",
     };
   }
 
+  // Step 3: deduplicate and aggregate
   const plans    = dedupByBid(raw);
   const stars    = plans.map(r => parseFloat(r.Star_Rating)).filter(n => !isNaN(n));
   const avgStar  = stars.length
-    ? (stars.reduce((a,b) => a+b, 0) / stars.length).toFixed(2) : null;
+    ? (stars.reduce((a,b) => a+b,0)/stars.length).toFixed(2) : null;
   const fourPlus = stars.filter(s => s >= 4).length;
-
-  const byState = {}, byOrg = {};
+  const byState  = {}, byOrg = {};
   plans.forEach(r => {
-    byState[r.State] = (byState[r.State] || 0) + 1;
-    byOrg[r.parent_organization] = (byOrg[r.parent_organization] || 0) + 1;
+    byState[r.State] = (byState[r.State]||0)+1;
+    byOrg[r.parent_organization] = (byOrg[r.parent_organization]||0)+1;
   });
   const topPayors = Object.entries(byOrg)
     .sort((a,b) => b[1]-a[1]).slice(0,10)
-    .map(([org, cnt]) => ({ org, plans: cnt }));
+    .map(([org,cnt]) => ({ org, plans: cnt }));
 
-  console.log("[queryLandscape] raw:", raw.length,
-    "deduped:", plans.length, "states:", stateList);
+  console.log("[Landscape] deduped:", plans.length,
+    "| by_state:", JSON.stringify(byState));
 
   return {
     unique_plan_count: plans.length,
@@ -128,13 +140,11 @@ async function queryLandscape(db, p) {
       ? ((fourPlus/plans.length)*100).toFixed(1)+"%" : "0%",
     by_state:          byState,
     top_10_payors:     topPayors,
-    filters_applied:   { states: stateList, county: p.county||null, org: p.parent_org||null },
-    note: plans.length === 0 && raw.length > 0
-      ? "Rows found but dedup returned 0 — check Bid_id column name in DB"
-      : null,
-    source: "Stars_Landscape table — unique plans by Bid_id",
+    filters_applied:   { states: stateList },
+    source:            "Stars_Landscape table",
   };
 }
+
 
 async function queryEnrollment(db, p) {
   const rawStates2 = p.states || (p.state ? [p.state] : null);
