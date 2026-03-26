@@ -2185,6 +2185,44 @@ function DBView({db, payor}) {
   const [loading,setLoading]=useState(true);
   const [planCtx,setPlanCtx]=useState(null);    // context received from iframe
   const copilotSendRef=useRef(null);             // ref to Copilot send function
+  const iframeRef=useRef(null);
+  const lastCtxId=useRef(null);
+
+  // ── Poll /api/context every 3s as REST fallback ───────────────────────────
+  // (used when Plan Comparison POSTs filters to /api/context instead of postMessage)
+  useEffect(function(){
+    const isArtifact = typeof window!=="undefined"
+      && window.location.hostname.endsWith("claude.ai");
+    if (isArtifact) return;
+    if (db.id !== "pc") return; // only poll when viewing Plan Comparison
+
+    const sid = "pc_" + (payor.id || "user");
+    const poll = setInterval(async function(){
+      try {
+        const r = await fetch("/api/context?session_id=" + sid);
+        const d = await r.json();
+        if (d.has_context && d.context
+          && d.context.context_id !== lastCtxId.current) {
+          lastCtxId.current = d.context.context_id;
+          // Convert context API format → planCtx format
+          const ctx = {
+            event:     d.context.action || "filter_changed",
+            state:     d.context.filters && d.context.filters.state     || null,
+            payor:     d.context.filters && d.context.filters.payor     || null,
+            plan_type: d.context.filters && d.context.filters.plan_type || null,
+            snp_type:  d.context.filters && d.context.filters.snp_type  || null,
+            county:    d.context.filters && d.context.filters.county    || null,
+            year:      d.context.filters && d.context.filters.year      || 2026,
+          };
+          setPlanCtx(ctx);
+          if (copilotSendRef.current && d.context.prompt) {
+            setTimeout(function(){ copilotSendRef.current(d.context.prompt); }, 500);
+          }
+        }
+      } catch(_) {}
+    }, 3000);
+    return function(){ clearInterval(poll); };
+  }, [db.id, payor]);
 
   // ── postMessage bridge — listens for events from Plan Comparison iframe ───
   useEffect(function(){
@@ -2295,6 +2333,52 @@ function DBView({db, payor}) {
             </div>
           </div>
           <div style={{marginLeft:"auto",display:"flex",alignItems:"center",gap:6}}>
+            {/* Manual capture button — user clicks after setting filters in Plan Comparison */}
+            {db.id==="pc" && (
+              <button
+                onClick={function(){
+                  // Read visible URL from iframe if accessible, otherwise prompt user
+                  const ctx = {
+                    event:     "filter_changed",
+                    state:     null,
+                    plan_type: null,
+                    snp_type:  null,
+                    year:      2026,
+                  };
+                  // Try to read iframe URL params
+                  try {
+                    const ifrSrc = iframeRef.current && iframeRef.current.contentWindow
+                      && iframeRef.current.contentWindow.location.href;
+                    if (ifrSrc) {
+                      const u = new URL(ifrSrc);
+                      ctx.state     = u.searchParams.get("state")     || ctx.state;
+                      ctx.plan_type = u.searchParams.get("plan_type") || ctx.plan_type;
+                      ctx.snp_type  = u.searchParams.get("snp_type")  || ctx.snp_type;
+                    }
+                  } catch(_) {
+                    // Cross-origin — can't read iframe URL, use what we have
+                  }
+                  // Even without params, trigger an auto-prompt
+                  const prompt = "The user has just applied filters in Plan Comparison "
+                    + "and clicked Execute. Using query_landscape_data and query_enrollment_data, "
+                    + "give a summary of the current market view including plan count, "
+                    + "top payors, avg star rating, and 2 key insights.";
+                  setPlanCtx(Object.assign({}, ctx, {event:"filter_changed"}));
+                  if (copilotSendRef.current) {
+                    setTimeout(function(){ copilotSendRef.current(prompt); }, 300);
+                  }
+                }}
+                style={{
+                  background:"#4F46E5",color:"#fff",
+                  border:"none",borderRadius:6,
+                  padding:"4px 10px",cursor:"pointer",
+                  fontSize:10.5,fontWeight:600,fontFamily:"inherit",
+                  display:"flex",alignItems:"center",gap:4,
+                }}>
+                <span style={{fontSize:11}}>📡</span>
+                Capture Filters
+              </button>
+            )}
             <span style={{background:db.catColor+"15",color:db.catColor,fontSize:11,
               padding:"2px 8px",borderRadius:20,fontWeight:600,
               border:"1px solid "+db.catColor+"33"}}>{db.cat}</span>
@@ -2348,7 +2432,7 @@ function DBView({db, payor}) {
               </a>
             </div>
           ):(
-            <iframe key={db.id} src={db.url} title={db.label}
+            <iframe key={db.id} ref={iframeRef} src={db.url} title={db.label}
               onLoad={function(){setLoading(false);}}
               onError={function(){setLoading(false);setIfrErr(true);}}
               style={{width:"100%",height:"100%",border:"none",display:"block"}}
