@@ -94,7 +94,7 @@ const NAV = [
 ];
 
 const TOOLS = [
-  {id:"queries",    label:"Client Queries",          icon:"💬", color:"#4F46E5"},
+  {id:"queries",    label:"GenieAI",                 icon:"✨", color:"#4F46E5"},
   {id:"reporting",  label:"Custom Reports",          icon:"📑", color:"#0891B2"},
   {id:"downloads",  label:"Data Downloads",          icon:"⬇️", color:"#059669"},
   {id:"news",       label:"MA Industry News",        icon:"📰", color:"#D97706"},
@@ -245,7 +245,11 @@ function mock(name, inp) {
 
 async function callAPI(hist, sys, onTool) {
   // Route: Claude.ai artifact → direct Anthropic (built-in proxy handles auth)
-  //        Vercel / any hosted domain → /api/chat serverless proxy
+  //        Vercel / any hosted domain → /api/chat (resolves tools server-side)
+  //
+  // IMPORTANT: On Vercel, api/chat.js handles ALL tool calls server-side
+  // using real Supabase data. The frontend never calls mock() for real queries.
+  // The client-side mock() is only used in the artifact preview environment.
   const isArtifact = typeof window !== "undefined"
     && window.location.hostname.endsWith("claude.ai");
   const endpoint = isArtifact
@@ -263,14 +267,16 @@ async function callAPI(hist, sys, onTool) {
     let msg = "API " + res.status;
     try {
       const e = await res.json();
-      if (e.detail && e.detail.error && e.detail.error.message)
-        msg = e.detail.error.message;
-      else if (e.error) msg = typeof e.error === "string" ? e.error : JSON.stringify(e.error);
+      if (e.error) msg = typeof e.error === "string"
+        ? e.error : JSON.stringify(e.error);
     } catch(_) {}
     throw new Error(msg);
   }
   const d = await res.json();
-  if (d.stop_reason === "tool_use") {
+
+  // On Claude.ai artifact only — resolve tool calls client-side with mock data
+  // On Vercel — api/chat.js already resolved all tools; this branch never runs
+  if (isArtifact && d.stop_reason === "tool_use") {
     const results = d.content
       .filter(function(b){return b.type==="tool_use";})
       .map(function(b){
@@ -283,6 +289,16 @@ async function callAPI(hist, sys, onTool) {
       sys, onTool
     );
   }
+
+  // On Vercel — expose tool_use blocks so the UI shows data source chips
+  if (!isArtifact && d.content) {
+    d.content
+      .filter(function(b){return b.type==="tool_use";})
+      .forEach(function(b){
+        if(onTool) onTool(b.name, b.input);
+      });
+  }
+
   return d;
 }
 

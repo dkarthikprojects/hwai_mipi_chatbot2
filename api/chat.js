@@ -1,11 +1,20 @@
-// api/chat.js — Vercel serverless proxy for OpenAI API
-// KEY FIX: tool results return SUMMARY STATS only (not full row arrays)
-// so GPT-4o context stays small and responses are fast.
+// api/chat.js — MIPI POWER HOUSE — Vercel Serverless Proxy
+//
+// Flow:
+//   Browser → /api/chat (this file)
+//     → OpenAI GPT-4o (decides which tool to call)
+//     → Supabase query (direct, no HTTP hop)
+//     → OpenAI GPT-4o again (generates answer from real data)
+//     → Browser (final text response with data source chips)
+//
+// All tool calls are resolved server-side with real Supabase data.
+// The browser NEVER calls mock() for Vercel deployments.
 
 import { createClient } from "@supabase/supabase-js";
 
 export const config = { api: { bodyParser: true } };
 
+// ── Supabase connection ───────────────────────────────────────────────────────
 function getDB() {
   const url = process.env.SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_KEY;
@@ -13,50 +22,47 @@ function getDB() {
   return createClient(url, key, { auth: { persistSession: false } });
 }
 
-function dedupByBid(rows, limit) {
+// ── Deduplicate plan rows by Bid_id ───────────────────────────────────────────
+// Stars_Landscape has one row per plan-county. Bid_id is the unique plan ID.
+function dedupByBid(rows) {
   const seen = new Set();
-  const out  = [];
-  for (const r of rows) {
-    const k = r.Bid_id || r.bid_id || (r.CONTRACT_ID + "|" + r.Plan_ID);
-    if (!seen.has(k)) { seen.add(k); out.push(r); }
-    if (out.length >= limit) break;
-  }
-  return out;
+  return rows.filter(r => {
+    const k = r.Bid_id || r.bid_id;
+    if (!k || seen.has(k)) return false;
+    seen.add(k); return true;
+  });
 }
 
-// ── Query handlers — return SUMMARY ONLY to keep token count low ─────────────
+// ── QUERY HANDLERS ────────────────────────────────────────────────────────────
+// Each returns a compact SUMMARY object — not full row arrays.
+// Keeping tool results small is critical: large JSON payloads cause
+// GPT-4o to time out or return empty responses on the second call.
 
 async function queryLandscape(db, p) {
   const stateList = p.states || (p.state ? [p.state] : null);
-  let q = db.from("Stars_Landscape").select(
-    "Bid_id,parent_organization,State,Star_Rating,Bench_mark"
-  );
-  if (stateList && stateList.length) q = q.in("State", stateList);
-  if (p.county)     q = q.ilike("County",              `%${p.county}%`);
-  if (p.parent_org) q = q.ilike("parent_organization", `%${p.parent_org}%`);
-  if (p.min_stars)  q = q.gte("Star_Rating",            String(p.min_stars));
-
-  const { data: raw, error } = await q.order("Bid_id").limit(5000);
+  let q = db.from("Stars_Landscape")
+    .select("Bid_id,parent_organization,State,County,Star_Rating,Bench_mark");
+  if (stateList?.length)  q = q.in("State", stateList);
+  if (p.county)           q = q.ilike("County", `%${p.county}%`);
+  if (p.parent_org)       q = q.ilike("parent_organization", `%${p.parent_org}%`);
+  if (p.min_stars)        q = q.gte("Star_Rating", String(p.min_stars));
+  const { data: raw, error } = await q.limit(10000);
   if (error) throw new Error("Stars_Landscape: " + error.message);
 
-  const plans    = dedupByBid(raw, 9999);
-  const starNums = plans.map(r => parseFloat(r.Star_Rating)).filter(n => !isNaN(n));
-  const avgStar  = starNums.length
-    ? (starNums.reduce((a, b) => a + b, 0) / starNums.length).toFixed(2) : null;
-  const fourPlus = starNums.filter(s => s >= 4).length;
+  const plans    = dedupByBid(raw);
+  const stars    = plans.map(r => parseFloat(r.Star_Rating)).filter(n => !isNaN(n));
+  const avgStar  = stars.length
+    ? (stars.reduce((a,b) => a+b, 0) / stars.length).toFixed(2) : null;
+  const fourPlus = stars.filter(s => s >= 4).length;
 
-  // Payor breakdown — top 10 only
-  const byOrg = {};
+  const byState = {}, byOrg = {};
   plans.forEach(r => {
+    byState[r.State] = (byState[r.State] || 0) + 1;
     byOrg[r.parent_organization] = (byOrg[r.parent_organization] || 0) + 1;
   });
   const topPayors = Object.entries(byOrg)
-    .sort((a, b) => b[1] - a[1]).slice(0, 10)
-    .map(([org, cnt]) => ({ org, plan_count: cnt }));
-
-  // State breakdown
-  const byState = {};
-  plans.forEach(r => { byState[r.State] = (byState[r.State] || 0) + 1; });
+    .sort((a,b) => b[1]-a[1]).slice(0,10)
+    .map(([org, cnt]) => ({ org, plans: cnt }));
 
   return {
     unique_plan_count: plans.length,
@@ -64,55 +70,50 @@ async function queryLandscape(db, p) {
     avg_star_rating:   avgStar,
     four_plus_count:   fourPlus,
     four_plus_pct:     plans.length
-      ? ((fourPlus / plans.length) * 100).toFixed(1) + "%" : "0%",
+      ? ((fourPlus/plans.length)*100).toFixed(1)+"%" : "0%",
     by_state:          byState,
-    top_payors:        topPayors,
-    filters_applied:   { states: stateList, county: p.county || null,
-                         parent_org: p.parent_org || null },
-    source: "Stars_Landscape table — unique plans by Bid_id",
+    top_10_payors:     topPayors,
+    filters:           { states: stateList, county: p.county||null, org: p.parent_org||null },
+    source:            "Stars_Landscape — unique Bid_id count",
   };
 }
 
 async function queryEnrollment(db, p) {
   const stateList = p.states || (p.state ? [p.state] : null);
-  let q = db.from("HWAI_Enrollment").select(
-    "State,Parent_Organization,Plan_Type,Special_Needs_Plan_Type," +
-    "DSNP_Eligible,MA_Eligible,Enrollment,Month,Year"
-  );
-  if (stateList && stateList.length) q = q.in("State", stateList);
-  if (p.county)     q = q.ilike("County",                  `%${p.county}%`);
-  if (p.parent_org) q = q.ilike("Parent_Organization",     `%${p.parent_org}%`);
-  if (p.plan_type)  q = q.ilike("Plan_Type",               `%${p.plan_type}%`);
-  if (p.snp_type)   q = q.ilike("Special_Needs_Plan_Type", `%${p.snp_type}%`);
-  if (p.month)      q = q.eq("Month", p.month);
-  if (p.year)       q = q.eq("Year",  p.year);
-
-  const { data, error } = await q.limit(5000);
+  let q = db.from("HWAI_Enrollment")
+    .select("State,Parent_Organization,Plan_Type,Special_Needs_Plan_Type,DSNP_Eligible,MA_Eligible,Enrollment,Month,Year");
+  if (stateList?.length)  q = q.in("State", stateList);
+  if (p.county)           q = q.ilike("County", `%${p.county}%`);
+  if (p.parent_org)       q = q.ilike("Parent_Organization", `%${p.parent_org}%`);
+  if (p.plan_type)        q = q.ilike("Plan_Type", `%${p.plan_type}%`);
+  if (p.snp_type)         q = q.ilike("Special_Needs_Plan_Type", `%${p.snp_type}%`);
+  if (p.month)            q = q.eq("Month", p.month);
+  if (p.year)             q = q.eq("Year", p.year);
+  const { data, error } = await q.limit(10000);
   if (error) throw new Error("HWAI_Enrollment: " + error.message);
 
-  const total    = data.reduce((s, r) => s + (Number(r.Enrollment)   || 0), 0);
-  const totalMA  = data.reduce((s, r) => s + (Number(r.MA_Eligible)  || 0), 0);
-  const totalDSNP= data.reduce((s, r) => s + (Number(r.DSNP_Eligible)|| 0), 0);
-
+  const total     = data.reduce((s,r) => s + (Number(r.Enrollment)||0),    0);
+  const totalMA   = data.reduce((s,r) => s + (Number(r.MA_Eligible)||0),   0);
+  const totalDSNP = data.reduce((s,r) => s + (Number(r.DSNP_Eligible)||0), 0);
   const byOrg = {};
   data.forEach(r => {
     byOrg[r.Parent_Organization] =
-      (byOrg[r.Parent_Organization] || 0) + (Number(r.Enrollment) || 0);
+      (byOrg[r.Parent_Organization]||0) + (Number(r.Enrollment)||0);
   });
   const topPayors = Object.entries(byOrg)
-    .sort((a, b) => b[1] - a[1]).slice(0, 10)
+    .sort((a,b) => b[1]-a[1]).slice(0,10)
     .map(([payor, cnt]) => ({
       payor, enrollment: cnt.toLocaleString(),
-      share_pct: total ? ((cnt / total) * 100).toFixed(1) + "%" : "0%",
+      share: total ? ((cnt/total)*100).toFixed(1)+"%" : "0%",
     }));
 
   return {
     total_enrollment:    total.toLocaleString(),
     total_ma_eligible:   totalMA.toLocaleString(),
     total_dsnp_eligible: totalDSNP.toLocaleString(),
-    top_payors:          topPayors,
-    filters_applied:     { states: stateList, month: p.month || null },
-    source: "HWAI_Enrollment table",
+    top_10_payors:       topPayors,
+    filters:             { states: stateList, month: p.month||null, year: p.year||null },
+    source:              "HWAI_Enrollment table",
   };
 }
 
@@ -120,37 +121,35 @@ async function queryStars(db, p) {
   let q = db.from("Stars_Cutpoint").select("CONTRACT_ID,Year");
   if (p.contract_id) q = q.eq("CONTRACT_ID", p.contract_id);
   if (p.year)        q = q.eq("Year", p.year);
-  const { data, error } = await q.limit(2000);
+  const { data, error } = await q.limit(5000);
   if (error) throw new Error("Stars_Cutpoint: " + error.message);
   return {
     total_records:    data.length,
     unique_contracts: new Set(data.map(r => r.CONTRACT_ID)).size,
-    source: "Stars_Cutpoint table",
+    source:           "Stars_Cutpoint table",
   };
 }
 
 async function queryFormulary(db, p) {
   let q = db.from("PartD_MRx").select("bid_id,Tier,Benefit,BenefitValue");
-  if (p.bid_id)  q = q.eq("bid_id", p.bid_id);
-  if (p.tier)    q = q.eq("Tier", String(p.tier));
+  if (p.bid_id)  q = q.eq("bid_id",  p.bid_id);
+  if (p.tier)    q = q.eq("Tier",    String(p.tier));
   if (p.benefit) q = q.ilike("Benefit", `%${p.benefit}%`);
-  const { data, error } = await q.order("Tier").limit(200);
+  const { data, error } = await q.order("Tier").limit(500);
   if (error) throw new Error("PartD_MRx: " + error.message);
   const tierDist = {};
-  data.forEach(r => { tierDist[r.Tier] = (tierDist[r.Tier] || 0) + 1; });
+  data.forEach(r => { tierDist[r.Tier] = (tierDist[r.Tier]||0)+1; });
   return {
-    total: data.length, tier_distribution: tierDist,
-    // Only return first 20 rows to keep context small
-    sample_rows: data.slice(0, 20),
-    source: "PartD_MRx table",
+    total:             data.length,
+    tier_distribution: tierDist,
+    sample:            data.slice(0, 15),
+    source:            "PartD_MRx table",
   };
 }
 
 async function queryDrugRankings(db, p) {
-  let q = db.from("PartD_Ranking").select(
-    "rxnorm_description,prime_disease,total_spending,total_claims," +
-    "total_beneficiaries,Brand_Name,Brand_YN"
-  );
+  let q = db.from("PartD_Ranking")
+    .select("rxnorm_description,prime_disease,total_spending,total_claims,total_beneficiaries,Brand_Name,Brand_YN");
   if (p.disease)   q = q.ilike("prime_disease",      `%${p.disease}%`);
   if (p.brand_yn)  q = q.eq("Brand_YN",              p.brand_yn);
   if (p.drug_name) q = q.ilike("rxnorm_description", `%${p.drug_name}%`);
@@ -162,37 +161,27 @@ async function queryDrugRankings(db, p) {
 
 async function queryTPV(db, p) {
   const stateList = p.states || (p.state ? [p.state] : null);
-  let q = db.from("TPV_Crosswalk").select(
-    "bid_id,State,Plan_Name,plan_type,parent_organization," +
-    "SNP,Special_Needs_Plan_Type,DVH,OTC,Inpatient,Transport,SSBCI," +
-    "Feb_enrollments,Dec_enrollments"
-  );
-  if (stateList && stateList.length) q = q.in("State", stateList);
-  if (p.county)     q = q.ilike("County",               `%${p.county}%`);
-  if (p.parent_org) q = q.ilike("parent_organization",  `%${p.parent_org}%`);
-  if (p.plan_type)  q = q.ilike("plan_type",            `%${p.plan_type}%`);
-
-  const { data: raw, error } = await q.limit(5000);
+  let q = db.from("TPV_Crosswalk")
+    .select("bid_id,State,Plan_Name,plan_type,parent_organization,SNP,Special_Needs_Plan_Type,DVH,OTC,Inpatient,Transport,SSBCI,Feb_enrollments,Dec_enrollments");
+  if (stateList?.length)  q = q.in("State", stateList);
+  if (p.county)           q = q.ilike("County",               `%${p.county}%`);
+  if (p.parent_org)       q = q.ilike("parent_organization",  `%${p.parent_org}%`);
+  if (p.plan_type)        q = q.ilike("plan_type",            `%${p.plan_type}%`);
+  const { data: raw, error } = await q.limit(10000);
   if (error) throw new Error("TPV_Crosswalk: " + error.message);
 
-  const seen = new Set(), plans = [];
-  for (const r of raw) {
-    if (!seen.has(r.bid_id)) { seen.add(r.bid_id); plans.push(r); }
-  }
-
-  const byOrg = {};
-  plans.forEach(r => {
-    byOrg[r.parent_organization] = (byOrg[r.parent_organization] || 0) + 1;
-  });
+  const plans    = dedupByBid(raw);
+  const byOrg    = {};
+  plans.forEach(r => { byOrg[r.parent_organization] = (byOrg[r.parent_organization]||0)+1; });
   const topPayors = Object.entries(byOrg)
-    .sort((a, b) => b[1] - a[1]).slice(0, 10)
-    .map(([org, cnt]) => ({ org, plan_count: cnt }));
+    .sort((a,b) => b[1]-a[1]).slice(0,10)
+    .map(([org, cnt]) => ({ org, plans: cnt }));
 
   return {
     unique_plan_count: plans.length,
-    top_payors:        topPayors,
+    top_10_payors:     topPayors,
     sample_plans:      plans.slice(0, 10),
-    source: "TPV_Crosswalk table",
+    source:            "TPV_Crosswalk table",
   };
 }
 
@@ -208,37 +197,38 @@ const HANDLERS = {
 
 async function resolveToolCall(name, input) {
   const db = getDB();
-  if (!db) return { error: "Supabase not configured", tool: name };
+  if (!db) return {
+    error:  "Supabase not configured — check SUPABASE_URL and SUPABASE_SERVICE_KEY in Vercel env vars",
+    tool:   name,
+  };
   const fn = HANDLERS[name];
-  if (!fn) return { error: "Unknown tool: " + name };
+  if (!fn) return { error: "Unknown tool: " + name, available: Object.keys(HANDLERS) };
   try {
     return await fn(db, input || {});
   } catch (e) {
-    console.error("[tool/" + name + "]", e.message);
+    console.error("[tool/" + name + "] ERROR:", e.message);
     return { error: e.message, tool: name };
   }
 }
 
+// ── OpenAI helper ─────────────────────────────────────────────────────────────
 async function openaiCall(apiKey, body) {
-  const res = await fetch("https://api.openai.com/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Content-Type":  "application/json",
-      "Authorization": "Bearer " + apiKey,
-    },
-    body: JSON.stringify(body),
+  const res  = await fetch("https://api.openai.com/v1/chat/completions", {
+    method:  "POST",
+    headers: { "Content-Type": "application/json", "Authorization": "Bearer " + apiKey },
+    body:    JSON.stringify(body),
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
-    const msg = data.error && data.error.message
-      ? data.error.message
-      : "HTTP " + res.status;
-    throw new Error("OpenAI: " + msg);
+    throw new Error(
+      "OpenAI " + res.status + ": " +
+      (data?.error?.message || JSON.stringify(data))
+    );
   }
   return data;
 }
 
-// ── Anthropic → OpenAI message conversion ────────────────────────────────────
+// ── Anthropic → OpenAI message format conversion ──────────────────────────────
 function convertMessages(messages) {
   const out = [];
   for (const msg of messages) {
@@ -248,9 +238,9 @@ function convertMessages(messages) {
         if (toolResults.length > 0) {
           for (const tr of toolResults) {
             out.push({
-              role: "tool",
+              role:         "tool",
               tool_call_id: tr.tool_use_id,
-              content: typeof tr.content === "string"
+              content:      typeof tr.content === "string"
                 ? tr.content : JSON.stringify(tr.content),
             });
           }
@@ -296,19 +286,23 @@ export default async function handler(req, res) {
 
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
-    return res.status(500).json({ error: "OPENAI_API_KEY is not set." });
+    return res.status(500).json({
+      error: "OPENAI_API_KEY is not set in Vercel environment variables.",
+    });
   }
 
   const { messages, system, tools, model, max_tokens } = req.body || {};
   if (!messages) return res.status(400).json({ error: "messages required" });
 
+  // Build OpenAI message array
   const oaiMessages = [];
   if (system) oaiMessages.push({ role: "system", content: system });
   oaiMessages.push(...convertMessages(messages));
 
-  const oaiTools = tools && tools.length > 0
+  // Convert Anthropic tool format → OpenAI tool format
+  const oaiTools = tools?.length > 0
     ? tools.map(t => ({
-        type: "function",
+        type:     "function",
         function: {
           name:        t.name,
           description: t.description,
@@ -324,35 +318,35 @@ export default async function handler(req, res) {
   if (oaiTools) { baseBody.tools = oaiTools; baseBody.tool_choice = "auto"; }
 
   try {
-    // ── First call ────────────────────────────────────────────────────────
-    const firstData = await openaiCall(apiKey, {
-      ...baseBody, messages: oaiMessages,
-    });
+    // ── Call 1: GPT-4o decides what to do ────────────────────────────────────
+    const firstData = await openaiCall(apiKey, { ...baseBody, messages: oaiMessages });
+    const firstMsg  = firstData.choices?.[0]?.message;
+    const stopReason = firstData.choices?.[0]?.finish_reason;
+    const content   = [];
 
-    const firstChoice  = firstData.choices && firstData.choices[0];
-    const firstMsg     = firstChoice && firstChoice.message;
-    const stopReason   = firstChoice && firstChoice.finish_reason;
-    const content      = [];
-
-    if (firstMsg && firstMsg.content) {
+    if (firstMsg?.content) {
       content.push({ type: "text", text: firstMsg.content });
     }
 
-    // ── Tool call path ────────────────────────────────────────────────────
-    if (firstMsg && firstMsg.tool_calls && firstMsg.tool_calls.length > 0) {
+    // ── Tool call path: resolve with real Supabase data ───────────────────────
+    if (firstMsg?.tool_calls?.length > 0) {
 
+      // Resolve each tool call directly against Supabase
       const toolResultMsgs = [];
       for (const tc of firstMsg.tool_calls) {
         let parsedInput = {};
-        try { parsedInput = JSON.parse(tc.function.arguments || "{}"); }
-        catch (_) {}
+        try { parsedInput = JSON.parse(tc.function.arguments || "{}"); } catch(_) {}
 
         const toolResult = await resolveToolCall(tc.function.name, parsedInput);
-        console.log("[tool]", tc.function.name, "→ keys:", Object.keys(toolResult));
+        console.log("[tool]", tc.function.name,
+          "rows/keys:", JSON.stringify(Object.keys(toolResult)));
 
+        // Expose as chip on the frontend
         content.push({
-          type: "tool_use", id: tc.id,
-          name: tc.function.name, input: parsedInput,
+          type:  "tool_use",
+          id:    tc.id,
+          name:  tc.function.name,
+          input: parsedInput,
         });
 
         toolResultMsgs.push({
@@ -362,85 +356,80 @@ export default async function handler(req, res) {
         });
       }
 
-      // ── Second call: system + history + assistant(tool_calls) + tool results
-      const secondMessages = [
-        ...oaiMessages,
-        {
-          role:       "assistant",
-          content:    firstMsg.content || null,
-          tool_calls: firstMsg.tool_calls,
-        },
-        ...toolResultMsgs,
-      ];
-
+      // ── Call 2: GPT-4o generates answer from real data ───────────────────
+      // Message order MUST be: history → assistant(+tool_calls) → tool results
+      // Tools are REMOVED so GPT-4o returns text, not another tool call.
+      let finalText = null;
       try {
         const secondData = await openaiCall(apiKey, {
           ...baseBody,
-          messages: secondMessages,
-          // Remove tools on second call so GPT-4o returns text, not another tool call
-          tools:       undefined,
+          tools:       undefined,   // force text response
           tool_choice: undefined,
+          messages: [
+            ...oaiMessages,
+            {
+              role:       "assistant",
+              content:    firstMsg.content || null,
+              tool_calls: firstMsg.tool_calls,
+            },
+            ...toolResultMsgs,
+          ],
         });
+        finalText = secondData.choices?.[0]?.message?.content || null;
+      } catch (e2) {
+        console.error("[call2]", e2.message);
+      }
 
-        const secondMsg = secondData.choices &&
-          secondData.choices[0] &&
-          secondData.choices[0].message;
-
-        if (secondMsg && secondMsg.content) {
-          content.unshift({ type: "text", text: secondMsg.content });
-        } else {
-          // Fallback: GPT-4o returned no text — generate a plain summary
-          const fallback = await openaiCall(apiKey, {
+      // ── Fallback: ask GPT-4o to summarise the raw data in plain English ───
+      if (!finalText) {
+        try {
+          const fallbackData = await openaiCall(apiKey, {
             model:      baseBody.model,
-            max_tokens: 500,
-            messages: [
-              {
-                role:    "user",
-                content: "Based on this data, give a short plain-English answer:\n"
-                  + toolResultMsgs.map(t => t.content).join("\n"),
-              },
-            ],
+            max_tokens: 600,
+            messages: [{
+              role:    "user",
+              content: "Here is data from a Medicare Advantage database. "
+                + "Give a clear, concise plain-English answer based on it:\n\n"
+                + toolResultMsgs.map(t => t.content).join("\n\n"),
+            }],
           });
-          const fbMsg = fallback.choices &&
-            fallback.choices[0] &&
-            fallback.choices[0].message;
-          if (fbMsg && fbMsg.content) {
-            content.unshift({ type: "text", text: fbMsg.content });
-          }
+          finalText = fallbackData.choices?.[0]?.message?.content || null;
+        } catch (e3) {
+          console.error("[fallback]", e3.message);
         }
-      } catch (secondErr) {
-        console.error("[second call]", secondErr.message);
+      }
+
+      if (finalText) {
+        content.unshift({ type: "text", text: finalText });
+      } else {
         content.unshift({
           type: "text",
-          text: "Data retrieved successfully. Error formatting response: "
-            + secondErr.message,
+          text: "Data retrieved from Supabase but GPT-4o did not generate a response. "
+            + "Please try rephrasing your question.",
         });
       }
     }
 
-    // If still no text content, add a fallback message
+    // Ensure there is always at least one text block
     if (!content.some(c => c.type === "text")) {
       content.unshift({
         type: "text",
-        text: "I retrieved the data but could not generate a response. "
-          + "Please try rephrasing your question.",
+        text: "No response generated. Please try again.",
       });
     }
-
-    const anthropicStop =
-      stopReason === "tool_calls" ? "tool_use"  :
-      stopReason === "stop"       ? "end_turn"   : stopReason;
 
     return res.status(200).json({
       id:          firstData.id,
       type:        "message",
       role:        "assistant",
       content,
-      stop_reason: anthropicStop,
+      stop_reason: stopReason === "tool_calls" ? "tool_use"
+                 : stopReason === "stop"       ? "end_turn"
+                 : stopReason,
     });
 
   } catch (err) {
-    console.error("[chat]", err.message);
+    console.error("[chat] FATAL:", err.message);
     return res.status(500).json({ error: err.message });
   }
 }
