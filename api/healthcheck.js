@@ -1,6 +1,5 @@
-// api/healthcheck.js
-// Diagnostic endpoint — visit /api/healthcheck to see connection status.
-// Remove or restrict this file after debugging.
+// api/healthcheck.js — Full diagnostic endpoint
+// Visit /api/healthcheck to see exact DB state
 
 import { createClient } from "@supabase/supabase-js";
 
@@ -8,55 +7,56 @@ export const config = { api: { bodyParser: false } };
 
 export default async function handler(req, res) {
   const report = {
-    timestamp:    new Date().toISOString(),
+    timestamp: new Date().toISOString(),
     env: {
-      OPENAI_API_KEY:       process.env.OPENAI_API_KEY
-        ? "SET (" + process.env.OPENAI_API_KEY.slice(0,8) + "...)" : "MISSING ❌",
-      SUPABASE_URL:         process.env.SUPABASE_URL
-        ? "SET (" + process.env.SUPABASE_URL + ")" : "MISSING ❌",
+      OPENAI_API_KEY:       !!process.env.OPENAI_API_KEY,
+      SUPABASE_URL:         process.env.SUPABASE_URL || "MISSING",
       SUPABASE_SERVICE_KEY: process.env.SUPABASE_SERVICE_KEY
-        ? "SET (" + process.env.SUPABASE_SERVICE_KEY.slice(0,12) + "...)" : "MISSING ❌",
+        ? process.env.SUPABASE_SERVICE_KEY.slice(0,20)+"..." : "MISSING",
     },
-    supabase_connection: null,
-    tables_visible:      [],
+    tables: {},
   };
 
-  // Test Supabase connection
   const url = process.env.SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_KEY;
 
   if (!url || !key) {
-    report.supabase_connection = "FAILED — env vars missing";
-  } else {
-    try {
-      const db = createClient(url, key, { auth: { persistSession: false } });
+    report.error = "Supabase env vars missing";
+    return res.status(200).json(report);
+  }
 
-      // Try a minimal query on Stars_Landscape
+  const db = createClient(url, key, { auth: { persistSession: false } });
+
+  // Check each table — count rows and sample first row
+  const tables = [
+    "Stars_Landscape",
+    "HWAI_Enrollment",
+    "Stars_Cutpoint",
+    "PartD_MRx",
+    "PartD_Ranking",
+    "TPV_Crosswalk",
+  ];
+
+  for (const t of tables) {
+    try {
+      // Get first 3 rows to see actual column names and values
       const { data, error } = await db
-        .from("Stars_Landscape")
-        .select("Bid_id")
-        .limit(1);
+        .from(t).select("*").limit(3);
 
       if (error) {
-        report.supabase_connection = "FAILED — " + error.message;
+        report.tables[t] = { status: "ERROR", message: error.message };
       } else {
-        report.supabase_connection = "OK ✅ — Stars_Landscape reachable";
-        report.sample_bid_id = data?.[0]?.Bid_id || "no rows";
+        report.tables[t] = {
+          status:       "OK",
+          row_count:    data.length,
+          columns:      data.length > 0 ? Object.keys(data[0]) : [],
+          sample_row:   data.length > 0 ? data[0] : null,
+        };
       }
-
-      // Check which tables exist
-      const tables = [
-        "Stars_Landscape","HWAI_Enrollment","Stars_Cutpoint",
-        "PartD_MRx","PartD_Ranking","TPV_Crosswalk",
-      ];
-      for (const t of tables) {
-        const { error: te } = await db.from(t).select("*").limit(1);
-        report.tables_visible.push({ table: t, status: te ? "❌ " + te.message : "✅" });
-      }
-    } catch (e) {
-      report.supabase_connection = "EXCEPTION — " + e.message;
+    } catch(e) {
+      report.tables[t] = { status: "EXCEPTION", message: e.message };
     }
   }
 
-  return res.status(200).json(report);
+  return res.status(200).json(report, null, 2);
 }
